@@ -31,7 +31,7 @@ type Card struct {
 	operationOnce         sync.Once
 	operationGate         chan struct{}
 	stateMu               sync.RWMutex
-	context               scardContext
+	nativeContext         scardContext
 	handle                scardHandle
 	protocol              Protocol
 	disconnectDisposition Disposition
@@ -59,7 +59,7 @@ func (card *Card) cancelOperation() error {
 		return nil
 	}
 
-	return cancelCardOperation(card.context)
+	return cancelCardOperation(card.nativeContext)
 }
 
 func (card *Card) lockOperation(ctx context.Context) error {
@@ -119,7 +119,11 @@ func runCardOperation[T any](
 		_ = card.cancelOperation()
 		return zero, ctx.Err()
 	case result := <-result:
-		return result.value, result.err
+		if result.err != nil {
+			return zero, result.err
+		}
+
+		return result.value, nil
 	}
 }
 
@@ -372,7 +376,7 @@ func (card *Card) Close() error {
 	card.closeOnce.Do(func() {
 		card.stateMu.Lock()
 		card.closed = true
-		cancelErr := cancelCardOperation(card.context)
+		cancelErr := cancelCardOperation(card.nativeContext)
 		card.stateMu.Unlock()
 		if errors.Is(cancelErr, ErrCanceled) {
 			cancelErr = nil
@@ -387,7 +391,7 @@ func (card *Card) Close() error {
 				"SCardDisconnect",
 				scardDisconnect(card.handle, scardDWORD(card.disconnectDisposition)),
 			),
-			releaseNativeContext(card.context),
+			releaseNativeContext(card.nativeContext),
 		)
 	})
 

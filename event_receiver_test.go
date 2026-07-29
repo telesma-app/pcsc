@@ -74,9 +74,9 @@ func TestEventReceiverPublishesTerminalError(t *testing.T) {
 	}
 
 	receiver := &eventReceiver{
-		events:  newDeviceEventQueue(),
-		context: scardContext(1),
-		stopped: make(chan struct{}),
+		events:        newDeviceEventQueue(),
+		nativeContext: scardContext(1),
+		stopped:       make(chan struct{}),
 	}
 	go receiver.run(nil, ReaderStateUnaware)
 

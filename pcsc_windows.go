@@ -71,12 +71,12 @@ var scardTransmit = func(
 	return result
 }
 
-var scardCancel = func(context scardContext) scardResult {
-	return scardResult(callCode(procSCardCancel, context))
+var scardCancel = func(nativeContext scardContext) scardResult {
+	return scardResult(callCode(procSCardCancel, nativeContext))
 }
 
-var scardReleaseContext = func(context scardContext) scardResult {
-	return scardResult(callCode(procSCardReleaseContext, context))
+var scardReleaseContext = func(nativeContext scardContext) scardResult {
+	return scardResult(callCode(procSCardReleaseContext, nativeContext))
 }
 
 var scardBeginTransaction = func(handle scardHandle) scardResult {
@@ -174,33 +174,36 @@ func callCode(proc *windows.LazyProc, args ...uintptr) uint32 {
 }
 
 func establishNativeContext() (scardContext, error) {
-	var context uintptr
+	var nativeContext uintptr
 	result := callCode(
 		procSCardEstablishContext,
 		scardScopeSystem,
 		0,
 		0,
-		uintptr(unsafe.Pointer(&context)),
+		uintptr(unsafe.Pointer(&nativeContext)),
 	)
+	if err := pcscError("SCardEstablishContext", result); err != nil {
+		return 0, err
+	}
 
-	return context, pcscError("SCardEstablishContext", result)
+	return nativeContext, nil
 }
 
-func releaseNativeContext(context scardContext) error {
-	return pcscError("SCardReleaseContext", uint32(scardReleaseContext(context)))
+func releaseNativeContext(nativeContext scardContext) error {
+	return pcscError("SCardReleaseContext", uint32(scardReleaseContext(nativeContext)))
 }
 
-func cancelNativeContext(context scardContext) error {
-	return pcscError("SCardCancel", uint32(scardCancel(context)))
+func cancelNativeContext(nativeContext scardContext) error {
+	return pcscError("SCardCancel", uint32(scardCancel(nativeContext)))
 }
 
-func cancelNativeCardOperation(context scardContext) error {
-	return cancelNativeContext(context)
+func cancelNativeCardOperation(nativeContext scardContext) error {
+	return cancelNativeContext(nativeContext)
 }
 
-func listReadersNative(context scardContext) ([]string, error) {
+func listReadersNative(nativeContext scardContext) ([]string, error) {
 	var size uint32
-	code := callCode(procSCardListReadersW, context, 0, 0, uintptr(unsafe.Pointer(&size)))
+	code := callCode(procSCardListReadersW, nativeContext, 0, 0, uintptr(unsafe.Pointer(&size)))
 	if err := pcscError("SCardListReadersW", code); err != nil {
 		if errors.Is(err, ErrNoReaders) {
 			return nil, nil
@@ -214,7 +217,7 @@ func listReadersNative(context scardContext) ([]string, error) {
 	buffer := make([]uint16, size)
 	code = callCode(
 		procSCardListReadersW,
-		context,
+		nativeContext,
 		0,
 		uintptr(unsafe.Pointer(unsafe.SliceData(buffer))),
 		uintptr(unsafe.Pointer(&size)),
@@ -226,7 +229,11 @@ func listReadersNative(context scardContext) ([]string, error) {
 	return parseUTF16MultiString(buffer[:min(int(size), len(buffer))]), nil
 }
 
-func getStatusChangeNative(context scardContext, timeout time.Duration, states []readerState) error {
+func getStatusChangeNative(
+	nativeContext scardContext,
+	timeout time.Duration,
+	states []readerState,
+) error {
 	names := make([][]uint16, len(states))
 	namePointers := make([]uintptr, len(states))
 	for index, state := range states {
@@ -238,7 +245,7 @@ func getStatusChangeNative(context scardContext, timeout time.Duration, states [
 	buffer := layout.encode(states, namePointers)
 	code := callCode(
 		procSCardGetStatusChangeW,
-		context,
+		nativeContext,
 		uintptr(durationMilliseconds(timeout)),
 		uintptr(unsafe.Pointer(unsafe.SliceData(buffer))),
 		uintptr(len(states)),
@@ -281,14 +288,14 @@ func parseUTF16MultiString(buf []uint16) []string {
 // negotiates T=0 or T=1, and leaves the card powered when closed.
 func Open(reader string, opts ...OpenOption) (*Card, error) {
 	options := newOpenOptions(opts...)
-	context, err := establishNativeContext()
+	nativeContext, err := establishNativeContext()
 	if err != nil {
 		return nil, err
 	}
 
 	name, err := windows.UTF16PtrFromString(reader)
 	if err != nil {
-		return nil, errors.Join(err, releaseNativeContext(context))
+		return nil, errors.Join(err, releaseNativeContext(nativeContext))
 	}
 
 	var handle uintptr
@@ -296,7 +303,7 @@ func Open(reader string, opts ...OpenOption) (*Card, error) {
 
 	code := callCode(
 		procSCardConnectW,
-		context,
+		nativeContext,
 		uintptr(unsafe.Pointer(name)),
 		uintptr(options.shareMode),
 		uintptr(options.preferredProtocols),
@@ -306,11 +313,11 @@ func Open(reader string, opts ...OpenOption) (*Card, error) {
 	runtime.KeepAlive(name)
 
 	if err := pcscError("SCardConnectW", code); err != nil {
-		return nil, errors.Join(err, releaseNativeContext(context))
+		return nil, errors.Join(err, releaseNativeContext(nativeContext))
 	}
 
 	return &Card{
-		context:               context,
+		nativeContext:         nativeContext,
 		handle:                handle,
 		protocol:              Protocol(protocol),
 		disconnectDisposition: options.disconnectDisposition,

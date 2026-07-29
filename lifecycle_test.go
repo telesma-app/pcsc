@@ -9,6 +9,20 @@ import (
 	"time"
 )
 
+func TestRunCardOperationDiscardsValueOnError(t *testing.T) {
+	expectedErr := errors.New("operation failed")
+
+	value, err := runCardOperation(new(Card), t.Context(), func() (int, error) {
+		return 42, expectedErr
+	})
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("error = %v, want operation error", err)
+	}
+	if value != 0 {
+		t.Fatalf("value = %d, want zero on error", value)
+	}
+}
+
 func TestBeginTransactionCancellationReturnsPromptly(t *testing.T) {
 	originalBegin := scardBeginTransaction
 	originalCancel := cancelCardOperation
@@ -45,7 +59,7 @@ func TestBeginTransactionCancellationReturnsPromptly(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	card := &Card{context: scardContext(1), handle: scardHandle(1)}
+	card := &Card{nativeContext: scardContext(1), handle: scardHandle(1)}
 	result := make(chan error, 1)
 	go func() {
 		result <- card.BeginTransaction(ctx)
@@ -126,7 +140,7 @@ func TestCloseCancelsInFlightOperation(t *testing.T) {
 	}
 
 	card := &Card{
-		context:               scardContext(1),
+		nativeContext:         scardContext(1),
 		handle:                scardHandle(1),
 		protocol:              ProtocolT1,
 		disconnectDisposition: DispositionResetCard,

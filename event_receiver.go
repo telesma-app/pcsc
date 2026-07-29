@@ -27,9 +27,9 @@ type readerState struct {
 }
 
 type eventReceiver struct {
-	events  *deviceEventQueue
-	context scardContext
-	stopped chan struct{}
+	events        *deviceEventQueue
+	nativeContext scardContext
+	stopped       chan struct{}
 
 	mu       sync.Mutex
 	closed   bool
@@ -48,7 +48,7 @@ func (receiver *eventReceiver) Close() error {
 		receiver.mu.Lock()
 		if !receiver.closed {
 			receiver.closed = true
-			cancelErr := cancelNativeContext(receiver.context)
+			cancelErr := cancelNativeContext(receiver.nativeContext)
 			if errors.Is(cancelErr, ErrCanceled) {
 				cancelErr = nil
 			}
@@ -84,13 +84,16 @@ func (receiver *eventReceiver) run(current map[string]*ReaderInfo, pnpState Read
 	defer receiver.events.Close()
 	defer func() {
 		receiver.mu.Lock()
-		receiver.closeErr = errors.Join(receiver.closeErr, releaseNativeContext(receiver.context))
+		receiver.closeErr = errors.Join(
+			receiver.closeErr,
+			releaseNativeContext(receiver.nativeContext),
+		)
 		receiver.mu.Unlock()
 	}()
 
 	for {
 		states := readerStates(slices.Sorted(maps.Keys(current)), current, pnpState)
-		err := waitForStatusChange(receiver.context, eventPollInterval, states)
+		err := waitForStatusChange(receiver.nativeContext, eventPollInterval, states)
 		if err != nil && !errors.Is(err, ErrTimeout) {
 			if receiver.recordRunError(err) {
 				receiver.events.SendTerminal(DeviceEvent{Err: err})
@@ -106,7 +109,7 @@ func (receiver *eventReceiver) run(current map[string]*ReaderInfo, pnpState Read
 		}
 
 		base, nextPnPState := snapshotFromReaderStates(states)
-		next, nextPnPState, err := readerSnapshot(receiver.context, base, nextPnPState)
+		next, nextPnPState, err := readerSnapshot(receiver.nativeContext, base, nextPnPState)
 		if err != nil {
 			if receiver.recordRunError(err) {
 				receiver.events.SendTerminal(DeviceEvent{Err: err})
@@ -133,20 +136,20 @@ func (receiver *eventReceiver) run(current map[string]*ReaderInfo, pnpState Read
 // Events publishes the current reader and card snapshot followed by live
 // reader and card-presence changes. Each call creates an independent receiver.
 func Events() (EventReceiver, error) {
-	context, err := establishNativeContext()
+	nativeContext, err := establishNativeContext()
 	if err != nil {
 		return nil, err
 	}
 
-	current, pnpState, err := readerSnapshot(context, nil, ReaderStateUnaware)
+	current, pnpState, err := readerSnapshot(nativeContext, nil, ReaderStateUnaware)
 	if err != nil {
-		return nil, errors.Join(err, releaseNativeContext(context))
+		return nil, errors.Join(err, releaseNativeContext(nativeContext))
 	}
 
 	receiver := &eventReceiver{
-		events:  newDeviceEventQueue(),
-		context: context,
-		stopped: make(chan struct{}),
+		events:        newDeviceEventQueue(),
+		nativeContext: nativeContext,
+		stopped:       make(chan struct{}),
 	}
 	for _, event := range reconcileDeviceEvents(nil, current) {
 		receiver.events.Send(event)
@@ -158,19 +161,19 @@ func Events() (EventReceiver, error) {
 }
 
 func readerSnapshot(
-	context scardContext,
+	nativeContext scardContext,
 	base map[string]*ReaderInfo,
 	pnpState ReaderState,
 ) (map[string]*ReaderInfo, ReaderState, error) {
-	names, err := listReadersNative(context)
+	names, err := listReadersNative(nativeContext)
 	if err != nil {
-		return nil, pnpState, err
+		return nil, ReaderStateUnaware, err
 	}
 
 	states := readerStates(names, base, pnpState)
-	err = waitForStatusChange(context, 0, states)
+	err = waitForStatusChange(nativeContext, 0, states)
 	if err != nil && !errors.Is(err, ErrTimeout) {
-		return nil, pnpState, err
+		return nil, ReaderStateUnaware, err
 	}
 
 	current, nextPnPState := snapshotFromReaderStates(states)
@@ -182,11 +185,11 @@ func readerSnapshot(
 // pseudo-reader. Ignoring it preserves card events while the periodic reader
 // snapshot provides a portable hot-plug fallback.
 func waitForStatusChange(
-	context scardContext,
+	nativeContext scardContext,
 	timeout time.Duration,
 	states []readerState,
 ) error {
-	err := getStatusChange(context, timeout, states)
+	err := getStatusChange(nativeContext, timeout, states)
 	if !errors.Is(err, ErrUnknownReader) {
 		return err
 	}
@@ -199,7 +202,7 @@ func waitForStatusChange(
 		states[index].currentState = ReaderStateIgnore
 		states[index].eventState = ReaderStateIgnore
 
-		return getStatusChange(context, timeout, states)
+		return getStatusChange(nativeContext, timeout, states)
 	}
 
 	return err

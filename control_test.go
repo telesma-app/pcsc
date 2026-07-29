@@ -178,7 +178,7 @@ func TestControlOwnsInputAfterCancellation(t *testing.T) {
 	input := []byte{1, 2, 3, 4}
 	callerPointer := byteSlicePointer(input)
 	ctx, cancel := context.WithCancel(context.Background())
-	card := &Card{context: scardContext(1), handle: scardHandle(1)}
+	card := &Card{nativeContext: scardContext(1), handle: scardHandle(1)}
 	result := make(chan error, 1)
 	go func() {
 		_, err := card.Control(ctx, 42, input, 4)

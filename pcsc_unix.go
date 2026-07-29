@@ -106,18 +106,24 @@ func establishNativeContext() (scardContext, error) {
 		return 0, err
 	}
 
-	var context scardContext
-	err := scardError("SCardEstablishContext", scardEstablishContext(scardScopeSystem, 0, 0, &context))
+	var nativeContext scardContext
+	err := scardError(
+		"SCardEstablishContext",
+		scardEstablishContext(scardScopeSystem, 0, 0, &nativeContext),
+	)
+	if err != nil {
+		return 0, err
+	}
 
-	return context, err
+	return nativeContext, nil
 }
 
-func releaseNativeContext(context scardContext) error {
-	return scardError("SCardReleaseContext", scardReleaseContext(context))
+func releaseNativeContext(nativeContext scardContext) error {
+	return scardError("SCardReleaseContext", scardReleaseContext(nativeContext))
 }
 
-func cancelNativeContext(context scardContext) error {
-	return scardError("SCardCancel", scardCancel(context))
+func cancelNativeContext(nativeContext scardContext) error {
+	return scardError("SCardCancel", scardCancel(nativeContext))
 }
 
 // pcsc-lite and Apple's PCSC framework only guarantee that SCardCancel
@@ -127,9 +133,12 @@ func cancelNativeCardOperation(scardContext) error {
 	return nil
 }
 
-func listReadersNative(context scardContext) ([]string, error) {
+func listReadersNative(nativeContext scardContext) ([]string, error) {
 	var size scardDWORD
-	if err := scardError("SCardListReaders", scardListReaders(context, 0, 0, &size)); err != nil {
+	if err := scardError(
+		"SCardListReaders",
+		scardListReaders(nativeContext, 0, 0, &size),
+	); err != nil {
 		if errors.Is(err, ErrNoReaders) {
 			return nil, nil
 		}
@@ -141,7 +150,7 @@ func listReadersNative(context scardContext) ([]string, error) {
 
 	buffer := make([]byte, size)
 	code := scardListReaders(
-		context,
+		nativeContext,
 		0,
 		uintptr(unsafe.Pointer(unsafe.SliceData(buffer))),
 		&size,
@@ -153,7 +162,11 @@ func listReadersNative(context scardContext) ([]string, error) {
 	return parseMultiString(buffer[:min(int(size), len(buffer))]), nil
 }
 
-func getStatusChangeNative(context scardContext, timeout time.Duration, states []readerState) error {
+func getStatusChangeNative(
+	nativeContext scardContext,
+	timeout time.Duration,
+	states []readerState,
+) error {
 	names := make([][]byte, len(states))
 	namePointers := make([]uintptr, len(states))
 	for index, state := range states {
@@ -165,7 +178,7 @@ func getStatusChangeNative(context scardContext, timeout time.Duration, states [
 	buffer := layout.encode(states, namePointers)
 	timeoutMilliseconds := durationMilliseconds(timeout)
 	code := scardGetStatusChange(
-		context,
+		nativeContext,
 		scardDWORD(timeoutMilliseconds),
 		uintptr(unsafe.Pointer(unsafe.SliceData(buffer))),
 		scardDWORD(len(states)),
@@ -208,7 +221,7 @@ func parseMultiString(buf []byte) []string {
 // negotiates T=0 or T=1, and leaves the card powered when closed.
 func Open(reader string, opts ...OpenOption) (*Card, error) {
 	options := newOpenOptions(opts...)
-	context, err := establishNativeContext()
+	nativeContext, err := establishNativeContext()
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +231,7 @@ func Open(reader string, opts ...OpenOption) (*Card, error) {
 	var protocol scardDWORD
 
 	code := scardConnect(
-		context,
+		nativeContext,
 		uintptr(unsafe.Pointer(unsafe.SliceData(name))),
 		scardDWORD(options.shareMode),
 		scardDWORD(options.preferredProtocols),
@@ -228,11 +241,11 @@ func Open(reader string, opts ...OpenOption) (*Card, error) {
 	runtime.KeepAlive(name)
 
 	if err := scardError("SCardConnect", code); err != nil {
-		return nil, errors.Join(err, releaseNativeContext(context))
+		return nil, errors.Join(err, releaseNativeContext(nativeContext))
 	}
 
 	return &Card{
-		context:               context,
+		nativeContext:         nativeContext,
 		handle:                handle,
 		protocol:              Protocol(uint32(protocol)),
 		disconnectDisposition: options.disconnectDisposition,

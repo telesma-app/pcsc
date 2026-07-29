@@ -26,10 +26,13 @@ func TestUnavailableNativeLibraryReturnsError(t *testing.T) {
 
 	var enumerateErr error
 	for reader, err := range Enumerate() {
+		enumerateErr = err
+		if err == nil {
+			t.Fatal("Enumerate error = nil, want unavailable error")
+		}
 		if reader != nil {
 			t.Fatalf("Enumerate reader = %#v, want nil", reader)
 		}
-		enumerateErr = err
 	}
 	if !errors.Is(enumerateErr, ErrUnavailable) {
 		t.Fatalf("Enumerate error = %v, want ErrUnavailable", enumerateErr)

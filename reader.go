@@ -13,14 +13,14 @@ import (
 // card state.
 func Enumerate() iter.Seq2[*ReaderInfo, error] {
 	return func(yield func(*ReaderInfo, error) bool) {
-		context, err := establishNativeContext()
+		nativeContext, err := establishNativeContext()
 		if err != nil {
 			yield(nil, err)
 			return
 		}
 
-		readers, _, snapshotErr := readerSnapshot(context, nil, ReaderStateUnaware)
-		if err := errors.Join(snapshotErr, releaseNativeContext(context)); err != nil {
+		readers, _, snapshotErr := readerSnapshot(nativeContext, nil, ReaderStateUnaware)
+		if err := errors.Join(snapshotErr, releaseNativeContext(nativeContext)); err != nil {
 			yield(nil, err)
 			return
 		}
