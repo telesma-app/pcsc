@@ -39,7 +39,7 @@ func TestTransmitDoesNotRetryAfterInsufficientBuffer(t *testing.T) {
 		return scardResultFromCodeForTest(scardEInsufficientBuf)
 	}
 
-	c := &Card{handle: scardHandle(1), protocol: ProtocolT1}
+	c := newCard(0, scardHandle(1), ProtocolT1, 0)
 	response, err := c.Transmit(context.Background(), []byte{0x00, 0xa4, 0x04, 0x00})
 	var pcscErr *Error
 	if !errors.As(err, &pcscErr) || pcscErr.Code != scardEInsufficientBuf {
@@ -87,7 +87,7 @@ func TestTransmitCancellationReturnsPromptlyAndRequestsNativeCancellation(t *tes
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &Card{nativeContext: scardContext(1), handle: scardHandle(1), protocol: ProtocolT1}
+	c := newCard(scardContext(1), scardHandle(1), ProtocolT1, 0)
 	result := make(chan error, 1)
 	go func() {
 		_, err := c.Transmit(ctx, []byte{0x00, 0xa4, 0x04, 0x00})
@@ -150,7 +150,7 @@ func TestTransmitOwnsInputAfterCancellation(t *testing.T) {
 	apdu := []byte{1, 2, 3, 4}
 	inputPointer := byteSlicePointer(apdu)
 	ctx, cancel := context.WithCancel(context.Background())
-	card := &Card{nativeContext: scardContext(1), handle: scardHandle(1), protocol: ProtocolT1}
+	card := newCard(scardContext(1), scardHandle(1), ProtocolT1, 0)
 	result := make(chan error, 1)
 	go func() {
 		_, err := card.Transmit(ctx, apdu)
@@ -190,7 +190,7 @@ func TestTransmitDoesNotStartAfterCancellationWhileQueued(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &Card{handle: scardHandle(1), protocol: ProtocolT1}
+	c := newCard(0, scardHandle(1), ProtocolT1, 0)
 	if err := c.lockOperation(context.Background()); err != nil {
 		t.Fatalf("lockOperation: %v", err)
 	}

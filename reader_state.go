@@ -111,7 +111,10 @@ func readNativeUint(src []byte) uint64 {
 }
 
 func durationMilliseconds(duration time.Duration) uint32 {
-	if duration <= 0 {
+	if duration < 0 {
+		return ^uint32(0)
+	}
+	if duration == 0 {
 		return 0
 	}
 

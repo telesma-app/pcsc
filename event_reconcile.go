@@ -2,7 +2,6 @@ package pcsc
 
 import (
 	"bytes"
-	"slices"
 	"sort"
 )
 
@@ -57,14 +56,8 @@ func reconcileDeviceEvents(previous, current map[string]*ReaderInfo) []DeviceEve
 }
 
 func newDeviceEvent(eventType DeviceEventType, info *ReaderInfo) DeviceEvent {
-	clonedInfo := &ReaderInfo{
-		Name:  info.Name,
-		State: info.State,
-		ATR:   slices.Clone(info.ATR),
-	}
-
 	return DeviceEvent{
 		Type:       eventType,
-		ReaderInfo: clonedInfo,
+		ReaderInfo: info,
 	}
 }

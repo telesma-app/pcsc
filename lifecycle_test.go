@@ -12,7 +12,7 @@ import (
 func TestRunCardOperationDiscardsValueOnError(t *testing.T) {
 	expectedErr := errors.New("operation failed")
 
-	value, err := runCardOperation(new(Card), t.Context(), func() (int, error) {
+	value, err := runCardOperation(newCard(0, 0, 0, 0), t.Context(), func() (int, error) {
 		return 42, expectedErr
 	})
 	if !errors.Is(err, expectedErr) {
@@ -59,7 +59,7 @@ func TestBeginTransactionCancellationReturnsPromptly(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	card := &Card{nativeContext: scardContext(1), handle: scardHandle(1)}
+	card := newCard(scardContext(1), scardHandle(1), 0, 0)
 	result := make(chan error, 1)
 	go func() {
 		result <- card.BeginTransaction(ctx)
@@ -139,12 +139,12 @@ func TestCloseCancelsInFlightOperation(t *testing.T) {
 		return 0
 	}
 
-	card := &Card{
-		nativeContext:         scardContext(1),
-		handle:                scardHandle(1),
-		protocol:              ProtocolT1,
-		disconnectDisposition: DispositionResetCard,
-	}
+	card := newCard(
+		scardContext(1),
+		scardHandle(1),
+		ProtocolT1,
+		DispositionResetCard,
+	)
 	transmitResult := make(chan error, 1)
 	go func() {
 		_, err := card.Transmit(context.Background(), []byte{1})
@@ -190,7 +190,7 @@ func TestEndTransactionForwardsDisposition(t *testing.T) {
 		return 0
 	}
 
-	card := &Card{handle: scardHandle(1)}
+	card := newCard(0, scardHandle(1), 0, 0)
 	if err := card.EndTransaction(DispositionResetCard); err != nil {
 		t.Fatalf("EndTransaction: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestReconnectUpdatesActiveProtocol(t *testing.T) {
 		return 0
 	}
 
-	card := &Card{handle: scardHandle(1), protocol: ProtocolT0}
+	card := newCard(0, scardHandle(1), ProtocolT0, 0)
 	protocol, err := card.Reconnect(
 		context.Background(),
 		ShareModeExclusive,
@@ -258,7 +258,7 @@ func TestReconnectRejectsInvalidParametersBeforeNativeCall(t *testing.T) {
 		return 0
 	}
 
-	card := &Card{handle: scardHandle(1), protocol: ProtocolT0}
+	card := newCard(0, scardHandle(1), ProtocolT0, 0)
 	_, err := card.Reconnect(
 		context.Background(),
 		ShareMode(99),
@@ -281,7 +281,8 @@ func TestReconnectRejectsInvalidParametersBeforeNativeCall(t *testing.T) {
 }
 
 func TestClosedCardRejectsLifecycleOperations(t *testing.T) {
-	card := &Card{closed: true}
+	card := newCard(0, 0, 0, 0)
+	card.closed = true
 
 	if err := card.BeginTransaction(context.Background()); !errors.Is(err, ErrClosed) {
 		t.Fatalf("BeginTransaction error = %v, want ErrClosed", err)

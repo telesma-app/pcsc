@@ -55,3 +55,9 @@ func TestDurationMillisecondsKeepsFiniteTimeoutFinite(t *testing.T) {
 		t.Fatalf("durationMilliseconds(%s) = 0x%x, want 0x%x", duration, got, infinite-1)
 	}
 }
+
+func TestDurationMillisecondsMapsNegativeDurationToInfinite(t *testing.T) {
+	if got := durationMilliseconds(-time.Nanosecond); got != ^uint32(0) {
+		t.Fatalf("durationMilliseconds(-1ns) = 0x%x, want PC/SC infinite", got)
+	}
+}

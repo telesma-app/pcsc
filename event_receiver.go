@@ -5,17 +5,18 @@ package pcsc
 import (
 	"errors"
 	"maps"
+	"runtime"
 	"slices"
-	"sync"
 	"time"
 )
 
-const (
-	pnpNotificationReader = `\\?PnP?\Notification`
-	eventPollInterval     = time.Second
-)
+const statusChangeInfinite = -time.Nanosecond
 
-var getStatusChange = getStatusChangeNative
+var (
+	getStatusChange   = getStatusChangeNative
+	listReaders       = listReadersNative
+	newReaderTopology = newReaderTopologyNative
+)
 
 // readerState is the platform-independent representation passed to the
 // SCardGetStatusChange ABI adapters.
@@ -28,192 +29,270 @@ type readerState struct {
 
 type eventReceiver struct {
 	events        *deviceEventQueue
+	topology      readerTopology
 	nativeContext scardContext
 	stopped       chan struct{}
-
-	mu       sync.Mutex
-	closed   bool
-	runErr   error
-	closeErr error
-
-	closeOnce sync.Once
+	snapshot      Snapshot
+	err           error
 }
 
-func (receiver *eventReceiver) Listen() <-chan DeviceEvent {
-	return receiver.events.Listen()
+type readerTopology interface {
+	Events() <-chan error
+	Close() error
 }
 
-func (receiver *eventReceiver) Close() error {
-	receiver.closeOnce.Do(func() {
-		receiver.mu.Lock()
-		if !receiver.closed {
-			receiver.closed = true
-			cancelErr := cancelNativeContext(receiver.nativeContext)
-			if errors.Is(cancelErr, ErrCanceled) {
-				cancelErr = nil
-			}
-			receiver.closeErr = errors.Join(receiver.closeErr, cancelErr)
-		}
-		receiver.mu.Unlock()
-
-		receiver.events.Close()
-		<-receiver.stopped
-	})
-
-	receiver.mu.Lock()
-	defer receiver.mu.Unlock()
-
-	return errors.Join(receiver.runErr, receiver.closeErr)
+type statusChangeResult struct {
+	states []readerState
+	err    error
 }
 
-func (receiver *eventReceiver) recordRunError(err error) bool {
-	receiver.mu.Lock()
-	defer receiver.mu.Unlock()
+func (r *eventReceiver) Listen() <-chan DeviceEvent {
+	return r.events.Listen()
+}
 
-	report := !receiver.closed || !errors.Is(err, ErrCanceled)
-	if report {
-		receiver.runErr = errors.Join(receiver.runErr, err)
+func (r *eventReceiver) Snapshot() Snapshot {
+	return r.snapshot
+}
+
+func (r *eventReceiver) Close() error {
+	r.events.Close()
+	<-r.stopped
+
+	return r.err
+}
+
+func (r *eventReceiver) recordRunError(err error) {
+	r.err = errors.Join(r.err, err)
+}
+
+func (r *eventReceiver) isDone() bool {
+	select {
+	case <-r.events.done:
+		return true
+	default:
+		return false
 	}
-	receiver.closed = true
-
-	return report
 }
 
-func (receiver *eventReceiver) run(current map[string]*ReaderInfo, pnpState ReaderState) {
-	defer close(receiver.stopped)
-	defer receiver.events.Close()
+func (r *eventReceiver) run(current map[string]*ReaderInfo) {
+	defer close(r.stopped)
+	defer r.events.Close()
 	defer func() {
-		receiver.mu.Lock()
-		receiver.closeErr = errors.Join(
-			receiver.closeErr,
-			releaseNativeContext(receiver.nativeContext),
+		r.err = errors.Join(
+			r.err,
+			r.topology.Close(),
+			releaseNativeContext(r.nativeContext),
 		)
-		receiver.mu.Unlock()
 	}()
 
 	for {
-		states := readerStates(slices.Sorted(maps.Keys(current)), current, pnpState)
-		err := waitForStatusChange(receiver.nativeContext, eventPollInterval, states)
-		if err != nil && !errors.Is(err, ErrTimeout) {
-			if receiver.recordRunError(err) {
-				receiver.events.SendTerminal(DeviceEvent{Err: err})
+		var (
+			topologyErr  error
+			statusResult statusChangeResult
+			refresh      bool
+		)
+
+		if len(current) == 0 {
+			select {
+			case topologyErr = <-r.topology.Events():
+				refresh = true
+			case <-r.events.done:
+				return
 			}
-			return
+		} else {
+			statusChanges := r.startStatusChange(current)
+			select {
+			case statusResult = <-statusChanges:
+			case topologyErr = <-r.topology.Events():
+				statusResult, _ = r.cancelStatusChange(statusChanges)
+				refresh = true
+			case <-r.events.done:
+				_, cancelErr := r.cancelStatusChange(statusChanges)
+				r.recordRunError(cancelErr)
+				return
+			}
 		}
 
-		receiver.mu.Lock()
-		closed := receiver.closed
-		receiver.mu.Unlock()
-		if closed {
+		if topologyErr != nil {
+			r.recordRunError(topologyErr)
 			return
 		}
+		if statusResult.err != nil {
+			switch {
+			case errors.Is(statusResult.err, ErrCanceled) && r.isDone():
+				return
+			case errors.Is(statusResult.err, ErrCanceled):
+			case errors.Is(statusResult.err, ErrUnknownReader):
+				refresh = true
+			default:
+				r.recordRunError(statusResult.err)
+				return
+			}
+		} else if statusResult.states != nil {
+			observed := snapshotFromReaderStates(statusResult.states)
+			for _, event := range reconcileDeviceEvents(current, observed) {
+				r.events.Send(event)
+			}
+			current = observed
+			refresh = refresh || readerTopologyInvalidated(statusResult.states)
+		}
+		if !refresh {
+			continue
+		}
 
-		base, nextPnPState := snapshotFromReaderStates(states)
-		next, nextPnPState, err := readerSnapshot(receiver.nativeContext, base, nextPnPState)
+		next, err := readerSnapshotUntil(r.nativeContext, current, r.events.done)
 		if err != nil {
-			if receiver.recordRunError(err) {
-				receiver.events.SendTerminal(DeviceEvent{Err: err})
+			if errors.Is(err, ErrCanceled) && r.isDone() {
+				return
 			}
+			r.recordRunError(err)
 			return
 		}
 
-		receiver.mu.Lock()
-		closed = receiver.closed
-		receiver.mu.Unlock()
-		if closed {
+		if r.isDone() {
 			return
 		}
 
 		for _, event := range reconcileDeviceEvents(current, next) {
-			receiver.events.Send(event)
+			r.events.Send(event)
 		}
 
 		current = next
-		pnpState = nextPnPState
 	}
 }
 
-// Events publishes the current reader and card snapshot followed by live
-// reader and card-presence changes. Each call creates an independent receiver.
-func Events() (EventReceiver, error) {
+func (r *eventReceiver) startStatusChange(current map[string]*ReaderInfo) <-chan statusChangeResult {
+	states := readerStates(slices.Sorted(maps.Keys(current)), current)
+	result := make(chan statusChangeResult, 1)
+	go func() {
+		result <- statusChangeResult{
+			states: states,
+			err:    getStatusChange(r.nativeContext, statusChangeInfinite, states),
+		}
+	}()
+
+	return result
+}
+
+func (r *eventReceiver) cancelStatusChange(
+	result <-chan statusChangeResult,
+) (statusChangeResult, error) {
+	var cancelErr error
+	for {
+		err := cancelNativeContext(r.nativeContext)
+		if err != nil && !errors.Is(err, ErrCanceled) && cancelErr == nil {
+			cancelErr = err
+		}
+		select {
+		case statusResult := <-result:
+			if statusResult.err != nil && !errors.Is(statusResult.err, ErrCanceled) {
+				statusResult.err = errors.Join(statusResult.err, cancelErr)
+			}
+
+			return statusResult, cancelErr
+		default:
+		}
+		runtime.Gosched()
+	}
+}
+
+// Watch captures the current reader and card snapshot and then publishes later
+// reader and card-presence changes. Each call creates an independent watcher.
+func Watch() (Watcher, error) {
 	nativeContext, err := establishNativeContext()
 	if err != nil {
 		return nil, err
 	}
 
-	current, pnpState, err := readerSnapshot(nativeContext, nil, ReaderStateUnaware)
+	topology, err := newReaderTopology()
 	if err != nil {
 		return nil, errors.Join(err, releaseNativeContext(nativeContext))
 	}
 
+	current, err := readerSnapshot(nativeContext, nil)
+	if err != nil {
+		return nil, errors.Join(err, topology.Close(), releaseNativeContext(nativeContext))
+	}
+
 	receiver := &eventReceiver{
 		events:        newDeviceEventQueue(),
+		topology:      topology,
 		nativeContext: nativeContext,
 		stopped:       make(chan struct{}),
-	}
-	for _, event := range reconcileDeviceEvents(nil, current) {
-		receiver.events.Send(event)
+		snapshot:      snapshotFromReaders(current),
 	}
 
-	go receiver.run(current, pnpState)
+	go receiver.run(current)
 
 	return receiver, nil
+}
+
+func snapshotFromReaders(readers map[string]*ReaderInfo) Snapshot {
+	snapshot := Snapshot{Readers: make([]*ReaderInfo, 0, len(readers))}
+	for _, name := range slices.Sorted(maps.Keys(readers)) {
+		snapshot.Readers = append(snapshot.Readers, readers[name])
+	}
+	return snapshot
 }
 
 func readerSnapshot(
 	nativeContext scardContext,
 	base map[string]*ReaderInfo,
-	pnpState ReaderState,
-) (map[string]*ReaderInfo, ReaderState, error) {
-	names, err := listReadersNative(nativeContext)
-	if err != nil {
-		return nil, ReaderStateUnaware, err
-	}
-
-	states := readerStates(names, base, pnpState)
-	err = waitForStatusChange(nativeContext, 0, states)
-	if err != nil && !errors.Is(err, ErrTimeout) {
-		return nil, ReaderStateUnaware, err
-	}
-
-	current, nextPnPState := snapshotFromReaderStates(states)
-
-	return current, nextPnPState, nil
+) (map[string]*ReaderInfo, error) {
+	return readerSnapshotUntil(nativeContext, base, nil)
 }
 
-// Some PC/SC implementations do not recognize the PnP notification
-// pseudo-reader. Ignoring it preserves card events while the periodic reader
-// snapshot provides a portable hot-plug fallback.
-func waitForStatusChange(
+func readerSnapshotUntil(
 	nativeContext scardContext,
-	timeout time.Duration,
-	states []readerState,
-) error {
-	err := getStatusChange(nativeContext, timeout, states)
-	if !errors.Is(err, ErrUnknownReader) {
-		return err
-	}
+	base map[string]*ReaderInfo,
+	done <-chan struct{},
+) (map[string]*ReaderInfo, error) {
+	for {
+		select {
+		case <-done:
+			return nil, ErrCanceled
+		default:
+		}
 
-	for index := range states {
-		if states[index].name != pnpNotificationReader || states[index].currentState == ReaderStateIgnore {
+		names, err := listReaders(nativeContext)
+		if err != nil {
+			return nil, err
+		}
+
+		states := readerStates(names, base)
+		err = getStatusChange(nativeContext, 0, states)
+		if errors.Is(err, ErrUnknownReader) {
+			// A reader disappeared after ListReaders. Enumerate the topology
+			// again instead of terminating the watcher.
+			continue
+		}
+		if err != nil && !errors.Is(err, ErrTimeout) {
+			return nil, err
+		}
+
+		if readerTopologyInvalidated(states) {
 			continue
 		}
 
-		states[index].currentState = ReaderStateIgnore
-		states[index].eventState = ReaderStateIgnore
+		return snapshotFromReaderStates(states), nil
+	}
+}
 
-		return getStatusChange(nativeContext, timeout, states)
+func readerTopologyInvalidated(states []readerState) bool {
+	for _, state := range states {
+		if state.eventState&(ReaderStateUnknown|ReaderStateUnavailable) != 0 {
+			return true
+		}
 	}
 
-	return err
+	return false
 }
 
 func readerStates(
 	names []string,
 	current map[string]*ReaderInfo,
-	pnpState ReaderState,
 ) []readerState {
-	states := make([]readerState, 0, len(names)+1)
+	states := make([]readerState, 0, len(names))
 	for _, name := range names {
 		state := readerState{name: name}
 		if info := current[name]; info != nil {
@@ -225,26 +304,14 @@ func readerStates(
 		states = append(states, state)
 	}
 
-	states = append(states, readerState{
-		name:         pnpNotificationReader,
-		currentState: pnpState,
-		eventState:   pnpState,
-	})
-
 	return states
 }
 
-func snapshotFromReaderStates(states []readerState) (map[string]*ReaderInfo, ReaderState) {
+func snapshotFromReaderStates(states []readerState) map[string]*ReaderInfo {
 	readers := make(map[string]*ReaderInfo, len(states))
-	var pnpState ReaderState
 
 	for _, state := range states {
 		normalized := state.eventState &^ ReaderStateChanged
-		if state.name == pnpNotificationReader {
-			pnpState = normalized
-			continue
-		}
-
 		readers[state.name] = &ReaderInfo{
 			Name:  state.name,
 			State: normalized,
@@ -252,5 +319,5 @@ func snapshotFromReaderStates(states []readerState) (map[string]*ReaderInfo, Rea
 		}
 	}
 
-	return readers, pnpState
+	return readers
 }

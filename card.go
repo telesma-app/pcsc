@@ -28,7 +28,6 @@ type scardIORequest struct {
 // but the native operation may continue in the background on implementations
 // that cannot cancel card operations, including pcsc-lite.
 type Card struct {
-	operationOnce         sync.Once
 	operationGate         chan struct{}
 	stateMu               sync.RWMutex
 	nativeContext         scardContext
@@ -38,6 +37,24 @@ type Card struct {
 	closed                bool
 	closeOnce             sync.Once
 	closeErr              error
+}
+
+func newCard(
+	nativeContext scardContext,
+	handle scardHandle,
+	protocol Protocol,
+	disconnectDisposition Disposition,
+) *Card {
+	operationGate := make(chan struct{}, 1)
+	operationGate <- struct{}{}
+
+	return &Card{
+		operationGate:         operationGate,
+		nativeContext:         nativeContext,
+		handle:                handle,
+		protocol:              protocol,
+		disconnectDisposition: disconnectDisposition,
+	}
 }
 
 func scardError(operation string, result scardResult) error {
@@ -63,11 +80,6 @@ func (card *Card) cancelOperation() error {
 }
 
 func (card *Card) lockOperation(ctx context.Context) error {
-	card.operationOnce.Do(func() {
-		card.operationGate = make(chan struct{}, 1)
-		card.operationGate <- struct{}{}
-	})
-
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

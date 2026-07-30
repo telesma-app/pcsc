@@ -137,35 +137,38 @@ The package also provides:
 
 ## Connection events
 
-`Events` first sends the current reader and card state. It then sends live
-changes in order:
+`Watch` captures the current reader and card state in an initial snapshot. It
+then sends live changes in order:
 
 - `DeviceEventReaderConnected`;
 - `DeviceEventReaderDisconnected`;
 - `DeviceEventCardInserted`;
 - `DeviceEventCardRemoved`.
 
-Each event receiver has its own PC/SC context and must be closed:
+Each watcher has its own PC/SC context and must be closed:
 
 ```go
-receiver, err := pcsc.Events()
+watcher, err := pcsc.Watch()
 if err != nil {
 	log.Fatal(err)
 }
-defer receiver.Close()
+defer watcher.Close()
 
-for event := range receiver.Listen() {
-	if event.Err != nil {
-		log.Printf("PC/SC events stopped: %v", event.Err)
-		break
-	}
+for _, reader := range watcher.Snapshot().Readers {
+	fmt.Printf("present: %s\n", reader.Name)
+}
 
+for event := range watcher.Listen() {
 	fmt.Printf("%s: %s\n", event.Type, event.ReaderInfo.Name)
+}
+
+if err := watcher.Close(); err != nil {
+	log.Printf("PC/SC watcher stopped: %v", err)
 }
 ```
 
-If the receiver stops because of a PC/SC error, the last event contains that
-error in `DeviceEvent.Err`.
+If the watcher stops because of a PC/SC error, `Listen` closes and `Close`
+returns that terminal error.
 
 ## Transactions
 

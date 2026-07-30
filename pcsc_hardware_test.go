@@ -9,7 +9,6 @@ import (
 	"errors"
 	"os"
 	"testing"
-	"time"
 )
 
 const hardwareTestEnv = "PCSC_TEST_CTAPNFC"
@@ -43,37 +42,22 @@ func TestPCSCLifecycle(t *testing.T) {
 		t.Fatal("no PC/SC readers found")
 	}
 
-	receiver, err := Events()
+	receiver, err := Watch()
 	if err != nil {
-		t.Fatalf("Events: %v", err)
+		t.Fatalf("Watch: %v", err)
 	}
 	connected := make(map[string]bool, len(readers))
-	deadline := time.NewTimer(3 * time.Second)
-	defer deadline.Stop()
-	for len(connected) < len(readers) {
-		select {
-		case event, ok := <-receiver.Listen():
-			if !ok {
-				t.Fatal("event stream closed during initial snapshot")
-			}
-			if event.Err != nil {
-				t.Fatalf("event error: %v", event.Err)
-			}
-			if event.ReaderInfo != nil {
-				t.Logf(
-					"event type=%s reader=%q state=0x%x ATR=%x",
-					event.Type,
-					event.ReaderInfo.Name,
-					event.ReaderInfo.State,
-					event.ReaderInfo.ATR,
-				)
-			}
-			if event.Type == DeviceEventReaderConnected {
-				connected[event.ReaderInfo.Name] = true
-			}
-		case <-deadline.C:
-			t.Fatalf("initial event snapshot reported %d of %d readers", len(connected), len(readers))
-		}
+	for _, reader := range receiver.Snapshot().Readers {
+		t.Logf(
+			"snapshot reader=%q state=0x%x ATR=%x",
+			reader.Name,
+			reader.State,
+			reader.ATR,
+		)
+		connected[reader.Name] = true
+	}
+	if len(connected) != len(readers) {
+		t.Fatalf("initial snapshot reported %d of %d readers", len(connected), len(readers))
 	}
 	if err := receiver.Close(); err != nil {
 		t.Errorf("close event receiver: %v", err)

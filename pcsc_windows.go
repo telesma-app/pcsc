@@ -252,13 +252,14 @@ func getStatusChangeNative(
 	)
 	runtime.KeepAlive(names)
 
-	if err := pcscError("SCardGetStatusChangeW", code); err != nil {
+	err := pcscError("SCardGetStatusChangeW", code)
+	if err != nil && !errors.Is(err, ErrTimeout) {
 		return err
 	}
 
 	layout.decode(buffer, states)
 
-	return nil
+	return err
 }
 
 func parseUTF16MultiString(buf []uint16) []string {
@@ -316,12 +317,12 @@ func Open(reader string, opts ...OpenOption) (*Card, error) {
 		return nil, errors.Join(err, releaseNativeContext(nativeContext))
 	}
 
-	return &Card{
-		nativeContext:         nativeContext,
-		handle:                handle,
-		protocol:              Protocol(protocol),
-		disconnectDisposition: options.disconnectDisposition,
-	}, nil
+	return newCard(
+		nativeContext,
+		handle,
+		Protocol(protocol),
+		options.disconnectDisposition,
+	), nil
 }
 
 func (card *Card) Status() (*CardStatus, error) {

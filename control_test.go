@@ -38,7 +38,7 @@ func TestControlForwardsRequestAndReturnsResponse(t *testing.T) {
 		return 0
 	}
 
-	card := &Card{handle: scardHandle(1)}
+	card := newCard(0, scardHandle(1), 0, 0)
 	response, err := card.Control(context.Background(), 42, input, responseSize)
 	if err != nil {
 		t.Fatalf("Control: %v", err)
@@ -68,7 +68,7 @@ func TestControlDoesNotRetryAfterInsufficientBuffer(t *testing.T) {
 		return scardResultFromCodeForTest(scardEInsufficientBuf)
 	}
 
-	card := &Card{handle: scardHandle(1)}
+	card := newCard(0, scardHandle(1), 0, 0)
 	_, err := card.Control(context.Background(), 42, nil, 4)
 	var pcscErr *Error
 	if !errors.As(err, &pcscErr) || pcscErr.Code != scardEInsufficientBuf {
@@ -102,7 +102,7 @@ func TestControlUsesRequestedResponseSize(t *testing.T) {
 		return 0
 	}
 
-	card := &Card{handle: scardHandle(1)}
+	card := newCard(0, scardHandle(1), 0, 0)
 	response, err := card.Control(context.Background(), 42, nil, 4)
 	if err != nil {
 		t.Fatalf("Control: %v", err)
@@ -113,7 +113,7 @@ func TestControlUsesRequestedResponseSize(t *testing.T) {
 }
 
 func TestControlRejectsInvalidResponseSize(t *testing.T) {
-	card := &Card{handle: scardHandle(1)}
+	card := newCard(0, scardHandle(1), 0, 0)
 	_, err := card.Control(context.Background(), 42, nil, -1)
 	if !errors.Is(err, ErrInvalidParameter) {
 		t.Fatalf("error = %v, want ErrInvalidParameter", err)
@@ -137,7 +137,7 @@ func TestControlRejectsInvalidReturnedSize(t *testing.T) {
 		return 0
 	}
 
-	card := &Card{handle: scardHandle(1)}
+	card := newCard(0, scardHandle(1), 0, 0)
 	_, err := card.Control(context.Background(), 42, nil, 4)
 	if !errors.Is(err, ErrInsufficientBuffer) {
 		t.Fatalf("error = %v, want ErrInsufficientBuffer", err)
@@ -178,7 +178,7 @@ func TestControlOwnsInputAfterCancellation(t *testing.T) {
 	input := []byte{1, 2, 3, 4}
 	callerPointer := byteSlicePointer(input)
 	ctx, cancel := context.WithCancel(context.Background())
-	card := &Card{nativeContext: scardContext(1), handle: scardHandle(1)}
+	card := newCard(scardContext(1), scardHandle(1), 0, 0)
 	result := make(chan error, 1)
 	go func() {
 		_, err := card.Control(ctx, 42, input, 4)
@@ -220,7 +220,7 @@ func TestGetAttributeQueriesSize(t *testing.T) {
 		return 0
 	}
 
-	card := &Card{handle: scardHandle(1)}
+	card := newCard(0, scardHandle(1), 0, 0)
 	value, err := card.GetAttribute(Attribute(7))
 	if err != nil {
 		t.Fatalf("GetAttribute: %v", err)
@@ -249,7 +249,7 @@ func TestSetAttributeForwardsValue(t *testing.T) {
 		return 0
 	}
 
-	card := &Card{handle: scardHandle(1)}
+	card := newCard(0, scardHandle(1), 0, 0)
 	if err := card.SetAttribute(Attribute(7), want); err != nil {
 		t.Fatalf("SetAttribute: %v", err)
 	}
