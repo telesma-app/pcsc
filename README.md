@@ -1,7 +1,7 @@
 # go-ctap/pcsc
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/go-ctap/pcsc.svg)](https://pkg.go.dev/github.com/go-ctap/pcsc)
-[![Go](https://github.com/go-ctap/pcsc/actions/workflows/go.yml/badge.svg)](https://github.com/go-ctap/pcsc/actions/workflows/go.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/telesma-app/pcsc.svg)](https://pkg.go.dev/github.com/telesma-app/pcsc)
+[![Go](https://github.com/telesma-app/pcsc/actions/workflows/go.yml/badge.svg)](https://github.com/telesma-app/pcsc/actions/workflows/go.yml)
 
 `go-ctap/pcsc` is a cgo-free Go library for PC/SC smart-card readers. It
 supports Windows, macOS and Linux.
@@ -35,7 +35,7 @@ This lets an application keep PC/SC support optional.
 ## Installation
 
 ```sh
-go get github.com/go-ctap/pcsc@latest
+go get github.com/telesma-app/pcsc@latest
 ```
 
 See [`go.mod`](go.mod) for the required Go version.
@@ -51,7 +51,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/go-ctap/pcsc"
+	"github.com/telesma-app/pcsc"
 )
 
 func main() {
@@ -240,8 +240,8 @@ This package provides low-level PC/SC access. It does not provide:
 - `GET RESPONSE` or command chaining;
 - application protocols such as CTAP, PIV or OpenPGP.
 
-Use [`go-ctap/ctap`](https://github.com/go-ctap/ctap) for FIDO2 commands and
-[`go-ctap/token2`](https://github.com/go-ctap/token2) for Token2 device support.
+Use [`go-ctap/ctap`](https://github.com/telesma-app/ctap) for FIDO2 commands and
+[`go-ctap/token2`](https://github.com/telesma-app/token2) for Token2 device support.
 
 ## Testing
 

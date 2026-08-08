@@ -1,4 +1,4 @@
-module github.com/go-ctap/pcsc
+module github.com/telesma-app/pcsc
 
 go 1.25.0
 
