@@ -2,7 +2,8 @@ package pcsc
 
 import (
 	"bytes"
-	"sort"
+	"maps"
+	"slices"
 )
 
 func reconcileDeviceEvents(previous, current map[string]*ReaderInfo) []DeviceEvent {
@@ -10,54 +11,45 @@ func reconcileDeviceEvents(previous, current map[string]*ReaderInfo) []DeviceEve
 	for name := range previous {
 		nameSet[name] = struct{}{}
 	}
+
 	for name := range current {
 		nameSet[name] = struct{}{}
 	}
 
-	names := make([]string, 0, len(nameSet))
-	for name := range nameSet {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
 	var events []DeviceEvent
-	for _, name := range names {
-		previousInfo := previous[name]
-		currentInfo := current[name]
+
+	for _, name := range slices.Sorted(maps.Keys(nameSet)) {
+		previousInfo, wasConnected := previous[name]
+		currentInfo, isConnected := current[name]
 
 		switch {
-		case previousInfo == nil && currentInfo != nil:
-			events = append(events, newDeviceEvent(DeviceEventReaderConnected, currentInfo))
+		case !wasConnected:
+			events = append(events, DeviceEvent{Type: DeviceEventReaderConnected, ReaderInfo: currentInfo})
 			if currentInfo.State&ReaderStatePresent != 0 {
-				events = append(events, newDeviceEvent(DeviceEventCardInserted, currentInfo))
+				events = append(events, DeviceEvent{Type: DeviceEventCardInserted, ReaderInfo: currentInfo})
 			}
 
-		case previousInfo != nil && currentInfo == nil:
+		case !isConnected:
 			if previousInfo.State&ReaderStatePresent != 0 {
-				events = append(events, newDeviceEvent(DeviceEventCardRemoved, previousInfo))
+				events = append(events, DeviceEvent{Type: DeviceEventCardRemoved, ReaderInfo: previousInfo})
 			}
-			events = append(events, newDeviceEvent(DeviceEventReaderDisconnected, previousInfo))
 
-		case previousInfo != nil && currentInfo != nil:
+			events = append(events, DeviceEvent{Type: DeviceEventReaderDisconnected, ReaderInfo: previousInfo})
+
+		default:
 			wasPresent := previousInfo.State&ReaderStatePresent != 0
 			isPresent := currentInfo.State&ReaderStatePresent != 0
 			cardChanged := wasPresent && isPresent && !bytes.Equal(previousInfo.ATR, currentInfo.ATR)
 
 			if wasPresent && (!isPresent || cardChanged) {
-				events = append(events, newDeviceEvent(DeviceEventCardRemoved, previousInfo))
+				events = append(events, DeviceEvent{Type: DeviceEventCardRemoved, ReaderInfo: previousInfo})
 			}
+
 			if isPresent && (!wasPresent || cardChanged) {
-				events = append(events, newDeviceEvent(DeviceEventCardInserted, currentInfo))
+				events = append(events, DeviceEvent{Type: DeviceEventCardInserted, ReaderInfo: currentInfo})
 			}
 		}
 	}
 
 	return events
-}
-
-func newDeviceEvent(eventType DeviceEventType, info *ReaderInfo) DeviceEvent {
-	return DeviceEvent{
-		Type:       eventType,
-		ReaderInfo: info,
-	}
 }

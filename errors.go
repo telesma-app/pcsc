@@ -113,6 +113,7 @@ func errorInfoForCode(code uint32) (errorInfo, bool) {
 	if !ok {
 		info, ok = platformErrorsByCode[code]
 	}
+
 	if code == unsupportedFeatureCode {
 		info.name = "unsupported feature"
 		info.alias = info.err

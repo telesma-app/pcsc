@@ -19,7 +19,7 @@ func Enumerate() iter.Seq2[*ReaderInfo, error] {
 			return
 		}
 
-		readers, snapshotErr := readerSnapshot(nativeContext, nil)
+		readers, snapshotErr := readerSnapshot(nativeContext, nil, nil)
 		if err := errors.Join(snapshotErr, releaseNativeContext(nativeContext)); err != nil {
 			yield(nil, err)
 			return

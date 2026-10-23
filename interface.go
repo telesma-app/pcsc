@@ -46,6 +46,7 @@ func cardInterfaceFromATR(atr []byte) CardInterface {
 	if len(atr) == 0 {
 		return CardInterfaceUnknown
 	}
+
 	if isContactlessATR(atr) {
 		return CardInterfaceContactless
 	}

@@ -82,6 +82,7 @@ func loadNativeLibrary() error {
 	if err != nil {
 		return fmt.Errorf("%w: load native library: %w", ErrUnavailable, err)
 	}
+
 	purego.RegisterLibFunc(&scardEstablishContext, lib, "SCardEstablishContext")
 	purego.RegisterLibFunc(&scardReleaseContext, lib, "SCardReleaseContext")
 	purego.RegisterLibFunc(&scardListReaders, lib, "SCardListReaders")
@@ -107,6 +108,7 @@ func establishNativeContext() (scardContext, error) {
 	}
 
 	var nativeContext scardContext
+
 	err := scardError(
 		"SCardEstablishContext",
 		scardEstablishContext(scardScopeSystem, 0, 0, &nativeContext),
@@ -142,13 +144,16 @@ func listReadersNative(nativeContext scardContext) ([]string, error) {
 		if errors.Is(err, ErrNoReaders) {
 			return nil, nil
 		}
+
 		return nil, err
 	}
+
 	if size == 0 {
 		return nil, nil
 	}
 
 	buffer := make([]byte, size)
+
 	code := scardListReaders(
 		nativeContext,
 		0,
@@ -168,6 +173,7 @@ func getStatusChangeNative(
 	states []readerState,
 ) error {
 	names := make([][]byte, len(states))
+
 	namePointers := make([]uintptr, len(states))
 	for index, state := range states {
 		names[index] = append([]byte(state.name), 0)
@@ -183,6 +189,7 @@ func getStatusChangeNative(
 		uintptr(unsafe.Pointer(unsafe.SliceData(buffer))),
 		scardDWORD(len(states)),
 	)
+
 	runtime.KeepAlive(names)
 
 	err := scardError("SCardGetStatusChange", code)
@@ -197,6 +204,7 @@ func getStatusChangeNative(
 
 func parseMultiString(buf []byte) []string {
 	var out []string
+
 	for len(buf) > 0 {
 		i := bytes.IndexByte(buf, 0)
 		if i < 0 {
@@ -215,6 +223,7 @@ func parseMultiString(buf []byte) []string {
 
 		buf = buf[i+1:]
 	}
+
 	return out
 }
 
@@ -222,13 +231,16 @@ func parseMultiString(buf []byte) []string {
 // negotiates T=0 or T=1, and leaves the card powered when closed.
 func Open(reader string, opts ...OpenOption) (*Card, error) {
 	options := newOpenOptions(opts...)
+
 	nativeContext, err := establishNativeContext()
 	if err != nil {
 		return nil, err
 	}
 
 	name := append([]byte(reader), 0)
+
 	var handle scardHandle
+
 	var protocol scardDWORD
 
 	code := scardConnect(
@@ -262,6 +274,7 @@ func (card *Card) Status() (*CardStatus, error) {
 	}
 
 	var readerLen, atrLen scardDWORD
+
 	var state, protocol scardDWORD
 
 	code := scardStatus(card.handle, 0, &readerLen, &state, &protocol, 0, &atrLen)
@@ -284,10 +297,11 @@ func (card *Card) Status() (*CardStatus, error) {
 	if err := scardError("SCardStatus", code); err != nil {
 		return nil, err
 	}
-	return newCardStatus(
-		parseMultiString(reader),
-		CardState(uint32(state)),
-		Protocol(uint32(protocol)),
-		atr[:min(int(atrLen), len(atr))],
-	), nil
+
+	return &CardStatus{
+		ReaderNames: parseMultiString(reader),
+		State:       CardState(state),
+		Protocol:    Protocol(protocol),
+		ATR:         atr[:min(int(atrLen), len(atr))],
+	}, nil
 }

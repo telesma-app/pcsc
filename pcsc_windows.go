@@ -175,6 +175,7 @@ func callCode(proc *windows.LazyProc, args ...uintptr) uint32 {
 
 func establishNativeContext() (scardContext, error) {
 	var nativeContext uintptr
+
 	result := callCode(
 		procSCardEstablishContext,
 		scardScopeSystem,
@@ -203,18 +204,22 @@ func cancelNativeCardOperation(nativeContext scardContext) error {
 
 func listReadersNative(nativeContext scardContext) ([]string, error) {
 	var size uint32
+
 	code := callCode(procSCardListReadersW, nativeContext, 0, 0, uintptr(unsafe.Pointer(&size)))
 	if err := pcscError("SCardListReadersW", code); err != nil {
 		if errors.Is(err, ErrNoReaders) {
 			return nil, nil
 		}
+
 		return nil, err
 	}
+
 	if size == 0 {
 		return nil, nil
 	}
 
 	buffer := make([]uint16, size)
+
 	code = callCode(
 		procSCardListReadersW,
 		nativeContext,
@@ -235,6 +240,7 @@ func getStatusChangeNative(
 	states []readerState,
 ) error {
 	names := make([][]uint16, len(states))
+
 	namePointers := make([]uintptr, len(states))
 	for index, state := range states {
 		names[index] = append(utf16.Encode([]rune(state.name)), 0)
@@ -250,6 +256,7 @@ func getStatusChangeNative(
 		uintptr(unsafe.Pointer(unsafe.SliceData(buffer))),
 		uintptr(len(states)),
 	)
+
 	runtime.KeepAlive(names)
 
 	err := pcscError("SCardGetStatusChangeW", code)
@@ -264,6 +271,7 @@ func getStatusChangeNative(
 
 func parseUTF16MultiString(buf []uint16) []string {
 	var out []string
+
 	for len(buf) > 0 {
 		i := 0
 		for i < len(buf) && buf[i] != 0 {
@@ -282,6 +290,7 @@ func parseUTF16MultiString(buf []uint16) []string {
 
 		buf = buf[i+1:]
 	}
+
 	return out
 }
 
@@ -289,6 +298,7 @@ func parseUTF16MultiString(buf []uint16) []string {
 // negotiates T=0 or T=1, and leaves the card powered when closed.
 func Open(reader string, opts ...OpenOption) (*Card, error) {
 	options := newOpenOptions(opts...)
+
 	nativeContext, err := establishNativeContext()
 	if err != nil {
 		return nil, err
@@ -300,6 +310,7 @@ func Open(reader string, opts ...OpenOption) (*Card, error) {
 	}
 
 	var handle uintptr
+
 	var protocol uint32
 
 	code := callCode(
@@ -365,10 +376,11 @@ func (card *Card) Status() (*CardStatus, error) {
 	if err := pcscError("SCardStatusW", code); err != nil {
 		return nil, err
 	}
-	return newCardStatus(
-		parseUTF16MultiString(reader),
-		CardState(state),
-		Protocol(protocol),
-		atr[:min(int(atrLen), len(atr))],
-	), nil
+
+	return &CardStatus{
+		ReaderNames: parseUTF16MultiString(reader),
+		State:       CardState(state),
+		Protocol:    Protocol(protocol),
+		ATR:         atr[:min(int(atrLen), len(atr))],
+	}, nil
 }

@@ -30,6 +30,7 @@ func newNativeReaderStateLayout(atrSize int, packed bool) nativeReaderStateLayou
 	rawSize := atrOffset + atrSize
 
 	stride := rawSize
+
 	if !packed {
 		alignment := max(pointerSize, dwordSize)
 		stride = (rawSize + alignment - 1) &^ (alignment - 1)
@@ -113,9 +114,6 @@ func readNativeUint(src []byte) uint64 {
 func durationMilliseconds(duration time.Duration) uint32 {
 	if duration < 0 {
 		return ^uint32(0)
-	}
-	if duration == 0 {
-		return 0
 	}
 
 	milliseconds := duration.Milliseconds()

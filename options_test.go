@@ -12,9 +12,11 @@ func TestOpenOptions(t *testing.T) {
 	if options.shareMode != ShareModeExclusive {
 		t.Fatalf("share mode = %d, want %d", options.shareMode, ShareModeExclusive)
 	}
+
 	if options.preferredProtocols != ProtocolT1 {
 		t.Fatalf("preferred protocols = %d, want %d", options.preferredProtocols, ProtocolT1)
 	}
+
 	if options.disconnectDisposition != DispositionResetCard {
 		t.Fatalf("disconnect disposition = %d, want %d", options.disconnectDisposition, DispositionResetCard)
 	}

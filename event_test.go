@@ -2,7 +2,7 @@ package pcsc
 
 import (
 	"fmt"
-	"slices"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -10,6 +10,7 @@ import (
 
 func TestDeviceEventQueueBurstIsLosslessAndOrdered(t *testing.T) {
 	queue := newDeviceEventQueue()
+
 	const count = 1000
 	for index := range count {
 		if !queue.Send(DeviceEvent{ReaderInfo: &ReaderInfo{Name: fmt.Sprintf("reader-%04d", index)}}) {
@@ -30,6 +31,7 @@ func TestDeviceEventQueueBurstIsLosslessAndOrdered(t *testing.T) {
 	}
 
 	queue.Close()
+
 	if _, ok := <-queue.Listen(); ok {
 		t.Fatal("event channel remains open after Close")
 	}
@@ -44,15 +46,18 @@ func TestDeviceEventQueueCloseWithoutListener(t *testing.T) {
 	}
 
 	done := make(chan struct{})
+
 	go func() {
 		queue.Close()
 		close(done)
 	}()
+
 	select {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("Close blocked without a listener")
 	}
+
 	if queue.Send(DeviceEvent{}) {
 		t.Fatal("Send accepted after Close")
 	}
@@ -62,16 +67,20 @@ func TestDeviceEventQueueConcurrentSendAndClose(t *testing.T) {
 	queue := newDeviceEventQueue()
 
 	const senderCount = 32
+
 	var senders sync.WaitGroup
+
 	var firstSends sync.WaitGroup
 	firstSends.Add(senderCount)
 	senders.Add(senderCount)
+
 	for range senderCount {
 		go func() {
 			defer senders.Done()
 
 			queue.Send(DeviceEvent{})
 			firstSends.Done()
+
 			for queue.Send(DeviceEvent{}) {
 			}
 		}()
@@ -80,8 +89,10 @@ func TestDeviceEventQueueConcurrentSendAndClose(t *testing.T) {
 	firstSends.Wait()
 
 	const closerCount = 8
+
 	var closers sync.WaitGroup
 	closers.Add(closerCount)
+
 	for range closerCount {
 		go func() {
 			defer closers.Done()
@@ -91,6 +102,7 @@ func TestDeviceEventQueueConcurrentSendAndClose(t *testing.T) {
 	}
 
 	finished := make(chan struct{})
+
 	go func() {
 		senders.Wait()
 		closers.Wait()
@@ -118,45 +130,47 @@ func TestReconcileDeviceEvents(t *testing.T) {
 		name     string
 		previous map[string]*ReaderInfo
 		current  map[string]*ReaderInfo
-		want     []DeviceEventType
+		want     []DeviceEvent
 	}{
 		{
 			name:    "initial snapshot",
 			current: map[string]*ReaderInfo{"B": emptyB, "A": presentA},
-			want: []DeviceEventType{
-				DeviceEventReaderConnected,
-				DeviceEventCardInserted,
-				DeviceEventReaderConnected,
+			want: []DeviceEvent{
+				{Type: DeviceEventReaderConnected, ReaderInfo: presentA},
+				{Type: DeviceEventCardInserted, ReaderInfo: presentA},
+				{Type: DeviceEventReaderConnected, ReaderInfo: emptyB},
 			},
 		},
 		{
 			name:     "card inserted",
 			previous: map[string]*ReaderInfo{"B": emptyB},
 			current:  map[string]*ReaderInfo{"B": presentB},
-			want:     []DeviceEventType{DeviceEventCardInserted},
+			want:     []DeviceEvent{{Type: DeviceEventCardInserted, ReaderInfo: presentB}},
 		},
 		{
 			name:     "card replaced without empty observation",
 			previous: map[string]*ReaderInfo{"A": presentA},
 			current:  map[string]*ReaderInfo{"A": replacedA},
-			want:     []DeviceEventType{DeviceEventCardRemoved, DeviceEventCardInserted},
+			want: []DeviceEvent{
+				{Type: DeviceEventCardRemoved, ReaderInfo: presentA},
+				{Type: DeviceEventCardInserted, ReaderInfo: replacedA},
+			},
 		},
 		{
 			name:     "reader removed with card",
 			previous: map[string]*ReaderInfo{"A": presentA},
-			want:     []DeviceEventType{DeviceEventCardRemoved, DeviceEventReaderDisconnected},
+			want: []DeviceEvent{
+				{Type: DeviceEventCardRemoved, ReaderInfo: presentA},
+				{Type: DeviceEventReaderDisconnected, ReaderInfo: presentA},
+			},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			events := reconcileDeviceEvents(test.previous, test.current)
-			got := make([]DeviceEventType, len(events))
-			for index, event := range events {
-				got[index] = event.Type
-			}
-			if !slices.Equal(got, test.want) {
-				t.Fatalf("event types = %v, want %v", got, test.want)
+			if !reflect.DeepEqual(events, test.want) {
+				t.Fatalf("events = %#v, want %#v", events, test.want)
 			}
 		})
 	}

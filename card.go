@@ -118,7 +118,9 @@ func runCardOperation[T any](
 		value T
 		err   error
 	}
+
 	result := make(chan operationResult, 1)
+
 	go func() {
 		defer card.unlockOperation()
 
@@ -141,6 +143,7 @@ func runCardOperation[T any](
 
 // BeginTransaction prevents other PC/SC applications from interleaving card
 // operations until EndTransaction is called.
+// If cancellation wins, a transaction established later is ended automatically.
 func (card *Card) BeginTransaction(ctx context.Context) error {
 	if err := card.lockOperation(ctx); err != nil {
 		return err
@@ -152,22 +155,15 @@ func (card *Card) BeginTransaction(ctx context.Context) error {
 		return ErrClosed
 	}
 
-	result := make(chan error, 1)
-	accepted := make(chan struct{})
+	result := make(chan error)
 	abandoned := make(chan struct{})
+
 	go func() {
 		defer card.unlockOperation()
 
 		err := scardError("SCardBeginTransaction", scardBeginTransaction(card.handle))
 		select {
 		case result <- err:
-			select {
-			case <-accepted:
-			case <-abandoned:
-				if err == nil {
-					_ = scardEndTransaction(card.handle, scardDWORD(DispositionLeaveCard))
-				}
-			}
 		case <-abandoned:
 			if err == nil {
 				_ = scardEndTransaction(card.handle, scardDWORD(DispositionLeaveCard))
@@ -178,12 +174,11 @@ func (card *Card) BeginTransaction(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		close(abandoned)
+
 		_ = card.cancelOperation()
 
 		return ctx.Err()
 	case err := <-result:
-		close(accepted)
-
 		return err
 	}
 }
@@ -216,6 +211,7 @@ func (card *Card) Reconnect(
 		}
 
 		var protocol scardDWORD
+
 		result := scardReconnect(
 			card.handle,
 			scardDWORD(shareMode),
@@ -279,6 +275,7 @@ func (card *Card) Transmit(ctx context.Context, apdu []byte) ([]byte, error) {
 			&size,
 		)
 		runtime.KeepAlive(apdu)
+
 		if err := scardError("SCardTransmit", result); err != nil {
 			return nil, err
 		}
@@ -299,6 +296,7 @@ func (card *Card) Control(
 	if responseSize < 0 || uint64(responseSize) > uint64(^scardDWORD(0)) {
 		return nil, fmt.Errorf("%w: control response size %d", ErrInvalidParameter, responseSize)
 	}
+
 	if uint64(len(input)) > uint64(^scardDWORD(0)) {
 		return nil, fmt.Errorf("%w: control input size %d", ErrInvalidParameter, len(input))
 	}
@@ -307,7 +305,9 @@ func (card *Card) Control(
 
 	return runCardOperation(card, ctx, func() ([]byte, error) {
 		response := make([]byte, responseSize)
+
 		var size scardDWORD
+
 		result := scardControl(
 			card.handle,
 			scardDWORD(controlCode),
@@ -318,9 +318,11 @@ func (card *Card) Control(
 			&size,
 		)
 		runtime.KeepAlive(input)
+
 		if err := scardError("SCardControl", result); err != nil {
 			return nil, err
 		}
+
 		if uint64(size) > uint64(len(response)) {
 			return nil, fmt.Errorf(
 				"%w: SCardControl returned %d bytes for a %d-byte buffer",
@@ -344,15 +346,18 @@ func (card *Card) GetAttribute(attribute Attribute) ([]byte, error) {
 	}
 
 	var size scardDWORD
+
 	result := scardGetAttrib(card.handle, scardDWORD(attribute), 0, &size)
 	if result != 0 && uint32(result) != scardEInsufficientBuf {
 		return nil, scardError("SCardGetAttrib", result)
 	}
+
 	if size == 0 {
 		return nil, nil
 	}
 
 	value := make([]byte, size)
+
 	result = scardGetAttrib(card.handle, scardDWORD(attribute), byteSlicePointer(value), &size)
 	if err := scardError("SCardGetAttrib", result); err != nil {
 		return nil, err
@@ -390,6 +395,7 @@ func (card *Card) Close() error {
 		card.closed = true
 		cancelErr := cancelCardOperation(card.nativeContext)
 		card.stateMu.Unlock()
+
 		if errors.Is(cancelErr, ErrCanceled) {
 			cancelErr = nil
 		}

@@ -28,6 +28,7 @@ func newReaderTopologyNative() (readerTopology, error) {
 	}
 
 	states := []readerState{{name: pnpNotificationReader}}
+
 	err = getStatusChange(nativeContext, 0, states)
 	if err != nil && !errors.Is(err, ErrTimeout) {
 		return nil, errors.Join(err, releaseNativeContext(nativeContext))
@@ -53,6 +54,7 @@ func (t *pnpReaderTopology) Close() error {
 		close(t.done)
 
 		var cancelErr error
+
 		for {
 			select {
 			case <-t.stopped:
@@ -60,6 +62,7 @@ func (t *pnpReaderTopology) Close() error {
 					cancelErr,
 					releaseNativeContext(t.nativeContext),
 				)
+
 				return
 			default:
 			}
@@ -68,6 +71,7 @@ func (t *pnpReaderTopology) Close() error {
 			if err != nil && !errors.Is(err, ErrCanceled) && cancelErr == nil {
 				cancelErr = err
 			}
+
 			runtime.Gosched()
 		}
 	})
@@ -91,15 +95,18 @@ func (t *pnpReaderTopology) run(current ReaderState) {
 			return
 		default:
 		}
+
 		if err != nil {
 			select {
 			case t.events <- err:
 			case <-t.done:
 			}
+
 			return
 		}
 
 		current = states[0].eventState &^ ReaderStateChanged
+
 		select {
 		case t.events <- nil:
 		default:

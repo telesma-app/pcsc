@@ -14,6 +14,7 @@ func TestParseUTF16MultiString(t *testing.T) {
 		0,
 		'j', 'u', 'n', 'k',
 	})
+
 	want := []string{"Reader A", "Reader B"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("parseUTF16MultiString() = %#v, want %#v", got, want)
@@ -24,9 +25,11 @@ func TestWindowsRawProtocolValue(t *testing.T) {
 	if ProtocolRaw != 0x00010000 {
 		t.Fatalf("ProtocolRaw = 0x%x, want 0x00010000", ProtocolRaw)
 	}
+
 	if ProtocolDefault != 0x80000000 {
 		t.Fatalf("ProtocolDefault = 0x%x, want 0x80000000", ProtocolDefault)
 	}
+
 	if ProtocolTx != ProtocolT0|ProtocolT1 {
 		t.Fatalf("ProtocolTx = 0x%x, want T=0 | T=1", ProtocolTx)
 	}
@@ -45,12 +48,14 @@ func TestWindowsPerformanceAttributeValues(t *testing.T) {
 			AttributePerformanceNumberOfTransmissions,
 		)
 	}
+
 	if AttributePerformanceBytesTransmitted != 0x7ffe0002 {
 		t.Fatalf(
 			"AttributePerformanceBytesTransmitted = 0x%x, want 0x7ffe0002",
 			AttributePerformanceBytesTransmitted,
 		)
 	}
+
 	if AttributePerformanceTransmissionTime != 0x7ffe0003 {
 		t.Fatalf(
 			"AttributePerformanceTransmissionTime = 0x%x, want 0x7ffe0003",
@@ -61,6 +66,7 @@ func TestWindowsPerformanceAttributeValues(t *testing.T) {
 
 func TestWindowsCardOperationCancellationCallsSCardCancel(t *testing.T) {
 	original := scardCancel
+
 	t.Cleanup(func() { scardCancel = original })
 
 	called := false
@@ -72,6 +78,7 @@ func TestWindowsCardOperationCancellationCallsSCardCancel(t *testing.T) {
 	if err := cancelNativeCardOperation(scardContext(1)); err != nil {
 		t.Fatalf("cancelNativeCardOperation: %v", err)
 	}
+
 	if !called {
 		t.Fatal("card operation cancellation did not call SCardCancel on Windows")
 	}

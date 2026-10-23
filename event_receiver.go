@@ -61,10 +61,6 @@ func (r *eventReceiver) Close() error {
 	return r.err
 }
 
-func (r *eventReceiver) recordRunError(err error) {
-	r.err = errors.Join(r.err, err)
-}
-
 func (r *eventReceiver) isDone() bool {
 	select {
 	case <-r.events.done:
@@ -108,24 +104,27 @@ func (r *eventReceiver) run(current map[string]*ReaderInfo) {
 				refresh = true
 			case <-r.events.done:
 				_, cancelErr := r.cancelStatusChange(statusChanges)
-				r.recordRunError(cancelErr)
+				r.err = cancelErr
+
 				return
 			}
 		}
 
 		if topologyErr != nil {
-			r.recordRunError(topologyErr)
+			r.err = topologyErr
 			return
 		}
+
 		if statusResult.err != nil {
 			switch {
-			case errors.Is(statusResult.err, ErrCanceled) && r.isDone():
-				return
 			case errors.Is(statusResult.err, ErrCanceled):
+				if r.isDone() {
+					return
+				}
 			case errors.Is(statusResult.err, ErrUnknownReader):
 				refresh = true
 			default:
-				r.recordRunError(statusResult.err)
+				r.err = statusResult.err
 				return
 			}
 		} else if statusResult.states != nil {
@@ -133,19 +132,23 @@ func (r *eventReceiver) run(current map[string]*ReaderInfo) {
 			for _, event := range reconcileDeviceEvents(current, observed) {
 				r.events.Send(event)
 			}
+
 			current = observed
 			refresh = refresh || readerTopologyInvalidated(statusResult.states)
 		}
+
 		if !refresh {
 			continue
 		}
 
-		next, err := readerSnapshotUntil(r.nativeContext, current, r.events.done)
+		next, err := readerSnapshot(r.nativeContext, current, r.events.done)
 		if err != nil {
 			if errors.Is(err, ErrCanceled) && r.isDone() {
 				return
 			}
-			r.recordRunError(err)
+
+			r.err = err
+
 			return
 		}
 
@@ -163,6 +166,7 @@ func (r *eventReceiver) run(current map[string]*ReaderInfo) {
 
 func (r *eventReceiver) startStatusChange(current map[string]*ReaderInfo) <-chan statusChangeResult {
 	states := readerStates(slices.Sorted(maps.Keys(current)), current)
+
 	result := make(chan statusChangeResult, 1)
 	go func() {
 		result <- statusChangeResult{
@@ -178,11 +182,13 @@ func (r *eventReceiver) cancelStatusChange(
 	result <-chan statusChangeResult,
 ) (statusChangeResult, error) {
 	var cancelErr error
+
 	for {
 		err := cancelNativeContext(r.nativeContext)
 		if err != nil && !errors.Is(err, ErrCanceled) && cancelErr == nil {
 			cancelErr = err
 		}
+
 		select {
 		case statusResult := <-result:
 			if statusResult.err != nil && !errors.Is(statusResult.err, ErrCanceled) {
@@ -192,6 +198,7 @@ func (r *eventReceiver) cancelStatusChange(
 			return statusResult, cancelErr
 		default:
 		}
+
 		runtime.Gosched()
 	}
 }
@@ -209,7 +216,7 @@ func Watch() (Watcher, error) {
 		return nil, errors.Join(err, releaseNativeContext(nativeContext))
 	}
 
-	current, err := readerSnapshot(nativeContext, nil)
+	current, err := readerSnapshot(nativeContext, nil, nil)
 	if err != nil {
 		return nil, errors.Join(err, topology.Close(), releaseNativeContext(nativeContext))
 	}
@@ -232,17 +239,11 @@ func snapshotFromReaders(readers map[string]*ReaderInfo) Snapshot {
 	for _, name := range slices.Sorted(maps.Keys(readers)) {
 		snapshot.Readers = append(snapshot.Readers, readers[name])
 	}
+
 	return snapshot
 }
 
 func readerSnapshot(
-	nativeContext scardContext,
-	base map[string]*ReaderInfo,
-) (map[string]*ReaderInfo, error) {
-	return readerSnapshotUntil(nativeContext, base, nil)
-}
-
-func readerSnapshotUntil(
 	nativeContext scardContext,
 	base map[string]*ReaderInfo,
 	done <-chan struct{},
@@ -260,12 +261,14 @@ func readerSnapshotUntil(
 		}
 
 		states := readerStates(names, base)
+
 		err = getStatusChange(nativeContext, 0, states)
 		if errors.Is(err, ErrUnknownReader) {
 			// A reader disappeared after ListReaders. Enumerate the topology
 			// again instead of terminating the watcher.
 			continue
 		}
+
 		if err != nil && !errors.Is(err, ErrTimeout) {
 			return nil, err
 		}
@@ -295,7 +298,7 @@ func readerStates(
 	states := make([]readerState, 0, len(names))
 	for _, name := range names {
 		state := readerState{name: name}
-		if info := current[name]; info != nil {
+		if info, ok := current[name]; ok {
 			state.currentState = info.State
 			state.eventState = info.State
 			state.atr = info.ATR

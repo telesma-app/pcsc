@@ -19,6 +19,7 @@ func TestDarwinReaderTopologyLifecycle(t *testing.T) {
 		go func() {
 			closed <- topology.Close()
 		}()
+
 		select {
 		case err := <-closed:
 			if err != nil {
@@ -37,11 +38,14 @@ func TestDarwinReaderTopologyConcurrentClose(t *testing.T) {
 	}
 
 	const closerCount = 16
+
 	var closers sync.WaitGroup
 	closers.Add(closerCount)
+
 	for range closerCount {
 		go func() {
 			defer closers.Done()
+
 			if err := topology.Close(); err != nil {
 				t.Errorf("Close: %v", err)
 			}
@@ -49,10 +53,12 @@ func TestDarwinReaderTopologyConcurrentClose(t *testing.T) {
 	}
 
 	closed := make(chan struct{})
+
 	go func() {
 		closers.Wait()
 		close(closed)
 	}()
+
 	select {
 	case <-closed:
 	case <-time.After(time.Second):

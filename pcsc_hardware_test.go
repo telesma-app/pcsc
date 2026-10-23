@@ -32,12 +32,15 @@ func TestPCSCLifecycle(t *testing.T) {
 	}
 
 	var readers []*ReaderInfo
+
 	for reader, err := range Enumerate() {
 		if err != nil {
 			t.Fatalf("Enumerate: %v", err)
 		}
+
 		readers = append(readers, reader)
 	}
+
 	if len(readers) == 0 {
 		t.Fatal("no PC/SC readers found")
 	}
@@ -46,7 +49,9 @@ func TestPCSCLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Watch: %v", err)
 	}
+
 	connected := make(map[string]bool, len(readers))
+
 	for _, reader := range receiver.Snapshot().Readers {
 		t.Logf(
 			"snapshot reader=%q state=0x%x ATR=%x",
@@ -56,24 +61,29 @@ func TestPCSCLifecycle(t *testing.T) {
 		)
 		connected[reader.Name] = true
 	}
+
 	if len(connected) != len(readers) {
 		t.Fatalf("initial snapshot reported %d of %d readers", len(connected), len(readers))
 	}
+
 	if err := receiver.Close(); err != nil {
 		t.Errorf("close event receiver: %v", err)
 	}
 
 	var opened int
+
 	for _, reader := range readers {
 		card, err := Open(reader.Name)
 		if errors.Is(err, ErrNoCard) {
 			t.Logf("reader %q has no card", reader.Name)
 			continue
 		}
+
 		if err != nil {
 			t.Errorf("Open(%q): %v", reader.Name, err)
 			continue
 		}
+
 		opened++
 
 		status, err := card.Status()
@@ -89,15 +99,18 @@ func TestPCSCLifecycle(t *testing.T) {
 				t.Errorf("attribute ATR = %x, status ATR = %x", atr, status.ATR)
 			}
 		}
+
 		if err := card.BeginTransaction(t.Context()); err != nil {
 			t.Errorf("BeginTransaction(%q): %v", reader.Name, err)
 		} else if err := card.EndTransaction(DispositionLeaveCard); err != nil {
 			t.Errorf("EndTransaction(%q): %v", reader.Name, err)
 		}
+
 		if err := card.Close(); err != nil {
 			t.Errorf("Close(%q): %v", reader.Name, err)
 		}
 	}
+
 	if opened == 0 {
 		t.Fatal("no card could be opened")
 	}
@@ -109,23 +122,28 @@ func TestCTAPNFC(t *testing.T) {
 	}
 
 	var readers []*ReaderInfo
+
 	for reader, err := range Enumerate() {
 		if err != nil {
 			t.Fatalf("Enumerate: %v", err)
 		}
+
 		readers = append(readers, reader)
 	}
+
 	if len(readers) == 0 {
 		t.Fatal("no PC/SC readers found")
 	}
 
 	var tested int
+
 	for _, reader := range readers {
 		card, err := Open(reader.Name)
 		if errors.Is(err, ErrNoCard) {
 			t.Logf("reader %q has no card", reader.Name)
 			continue
 		}
+
 		if err != nil {
 			t.Errorf("Open(%q): %v", reader.Name, err)
 			continue
@@ -134,6 +152,7 @@ func TestCTAPNFC(t *testing.T) {
 		if testCTAPNFCCard(t, reader, card) {
 			tested++
 		}
+
 		if err := card.Close(); err != nil {
 			t.Errorf("Close(%q): %v", reader.Name, err)
 		}
@@ -153,14 +172,18 @@ func testCTAPNFCCard(t *testing.T, reader *ReaderInfo, card *Card) bool {
 		t.Errorf("Status(%q): %v", reader.Name, err)
 		return false
 	}
+
 	t.Logf("reader=%q status_readers=%q protocol=%d state=0x%x ATR=%s",
 		reader.Name, status.ReaderNames, status.Protocol, status.State, hex.EncodeToString(status.ATR))
+
 	if len(status.ReaderNames) == 0 {
 		t.Errorf("Status(%q) returned an empty reader name", reader.Name)
 	}
+
 	if len(status.ATR) == 0 {
 		t.Errorf("Status(%q) returned an empty ATR", reader.Name)
 	}
+
 	if status.Protocol != ProtocolT0 && status.Protocol != ProtocolT1 {
 		t.Errorf("Status(%q) protocol = %d, want T=0 or T=1", reader.Name, status.Protocol)
 	}
@@ -170,6 +193,7 @@ func testCTAPNFCCard(t *testing.T, reader *ReaderInfo, card *Card) bool {
 		t.Errorf("SELECT FIDO applet on %q: %v", reader.Name, err)
 		return false
 	}
+
 	if !hasStatusWord(selected, 0x90, 0x00) {
 		t.Logf("reader %q is not a FIDO card: SELECT response=%x", reader.Name, selected)
 		return false
@@ -180,6 +204,7 @@ func testCTAPNFCCard(t *testing.T, reader *ReaderInfo, card *Card) bool {
 		t.Errorf("authenticatorGetInfo on %q: %v", reader.Name, err)
 		return true
 	}
+
 	for hasStatusWord(response, 0x91, 0x00) {
 		response, err = exchangeISOResponse(ctx, card, []byte{0x80, 0x11, 0x00, 0x00, 0x00})
 		if err != nil {
@@ -187,6 +212,7 @@ func testCTAPNFCCard(t *testing.T, reader *ReaderInfo, card *Card) bool {
 			return true
 		}
 	}
+
 	if !hasStatusWord(response, 0x90, 0x00) {
 		t.Errorf("authenticatorGetInfo on %q response = %x, want SW=9000", reader.Name, response)
 		return true
@@ -197,6 +223,7 @@ func testCTAPNFCCard(t *testing.T, reader *ReaderInfo, card *Card) bool {
 		t.Errorf("authenticatorGetInfo on %q payload = %x, want CTAP status and CBOR body", reader.Name, payload)
 		return true
 	}
+
 	if payload[0] != 0 {
 		t.Errorf("authenticatorGetInfo on %q CTAP status = 0x%02x, want success", reader.Name, payload[0])
 	}
@@ -204,7 +231,9 @@ func testCTAPNFCCard(t *testing.T, reader *ReaderInfo, card *Card) bool {
 	if payload[1]>>5 != 5 {
 		t.Errorf("authenticatorGetInfo on %q body starts with 0x%02x, want a CBOR map", reader.Name, payload[1])
 	}
+
 	t.Logf("authenticatorGetInfo response=%x", response)
+
 	return true
 }
 
@@ -215,11 +244,14 @@ func exchangeISOResponse(ctx context.Context, card *Card, command []byte) ([]byt
 	}
 
 	var data []byte
+
 	for {
 		if len(response) < 2 {
 			return response, nil
 		}
+
 		data = append(data, response[:len(response)-2]...)
+
 		sw1, sw2 := response[len(response)-2], response[len(response)-1]
 		if sw1 != 0x61 && sw1 != 0x9f {
 			return append(data, sw1, sw2), nil

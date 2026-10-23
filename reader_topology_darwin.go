@@ -80,6 +80,7 @@ func newReaderTopologyNative() (readerTopology, error) {
 
 	ready := make(chan error)
 	go topology.run(ready)
+
 	if err := <-ready; err != nil {
 		<-topology.stopped
 		return nil, err
@@ -115,6 +116,7 @@ func (t *darwinReaderTopology) Close() error {
 
 func (t *darwinReaderTopology) run(ready chan<- error) {
 	runtime.LockOSThread()
+
 	defer runtime.UnlockOSThread()
 	defer close(t.stopped)
 
@@ -122,6 +124,7 @@ func (t *darwinReaderTopology) run(ready chan<- error) {
 	readerTopologyRegistry.next++
 	registry := readerTopologyRegistry.next
 	readerTopologyRegistry.topologies[registry] = t
+
 	readerTopologyRegistry.Unlock()
 	defer func() {
 		readerTopologyRegistry.Lock()
@@ -134,6 +137,7 @@ func (t *darwinReaderTopology) run(ready chan<- error) {
 		ready <- fmt.Errorf("%w: create IOKit notification port", ErrUnavailable)
 		return
 	}
+
 	var arrivals, removals uint32
 	defer func() {
 		releaseIOObject(arrivals)
@@ -143,9 +147,11 @@ func (t *darwinReaderTopology) run(ready chan<- error) {
 
 	source := ioNotificationPortGetRunLoopSource(port)
 	runLoop := cfRunLoopGetCurrent()
+
 	t.mu.Lock()
 	t.runLoop = runLoop
 	cfRunLoopAddSource(runLoop, source, cfRunLoopDefaultMode)
+
 	t.mu.Unlock()
 	defer func() {
 		t.mu.Lock()
@@ -163,6 +169,7 @@ func (t *darwinReaderTopology) run(ready chan<- error) {
 		ready <- err
 		return
 	}
+
 	if err := addReaderTopologyNotification(
 		port,
 		registry,
@@ -175,11 +182,13 @@ func (t *darwinReaderTopology) run(ready chan<- error) {
 
 	drainReaderTopologyIterator(arrivals)
 	drainReaderTopologyIterator(removals)
+
 	ready <- nil
 
 	t.mu.Lock()
 	closed := t.closed
 	t.mu.Unlock()
+
 	if !closed {
 		cfRunLoopRun()
 	}
@@ -195,6 +204,7 @@ func addReaderTopologyNotification(
 	if err != nil {
 		return err
 	}
+
 	notificationName := cString(notification)
 	code := ioServiceAddMatchingNotification(
 		port,
@@ -205,6 +215,7 @@ func addReaderTopologyNotification(
 		iterator,
 	)
 	runtime.KeepAlive(notificationName)
+
 	if code != 0 {
 		return fmt.Errorf("pcsc: IOKit notification %q failed (0x%08x)", notification, uint32(code))
 	}
@@ -236,6 +247,7 @@ func (t *darwinReaderTopology) changed() {
 func (t *darwinReaderTopology) notify() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
 	if t.closed {
 		return
 	}
@@ -248,12 +260,15 @@ func (t *darwinReaderTopology) notify() {
 
 func drainReaderTopologyIterator(iterator uint32) bool {
 	var found bool
+
 	for {
 		object := ioIteratorNext(iterator)
 		if object == 0 {
 			return found
 		}
+
 		found = true
+
 		ioObjectRelease(object)
 	}
 }
@@ -262,6 +277,7 @@ func usbSmartCardInterfaceMatching() (uintptr, error) {
 	className := cString(ioUSBHostInterfaceClass)
 	matching := ioServiceMatching(uintptr(unsafe.Pointer(unsafe.SliceData(className))))
 	runtime.KeepAlive(className)
+
 	if matching == 0 {
 		return 0, fmt.Errorf("%w: create IOKit matching dictionary", ErrUnavailable)
 	}
@@ -280,9 +296,12 @@ func usbSmartCardInterfaceMatching() (uintptr, error) {
 
 	propertyMatchKey := newCFString(ioPropertyMatchKey)
 	defer cfRelease(propertyMatchKey)
+
 	interfaceClassKey := newCFString(ioUSBInterfaceClassKey)
 	defer cfRelease(interfaceClassKey)
+
 	interfaceClass := int32(usbChipSmartCardInterfaceClass)
+
 	interfaceClassValue := cfNumberCreate(
 		0,
 		cfNumberSInt32Type,
@@ -323,6 +342,7 @@ func loadReaderTopologyFrameworks() error {
 	if err != nil {
 		return fmt.Errorf("%w: load IOKit: %w", ErrUnavailable, err)
 	}
+
 	coreFoundation, err := purego.Dlopen(
 		coreFoundationLibrary,
 		purego.RTLD_NOW|purego.RTLD_GLOBAL,
@@ -381,6 +401,7 @@ func loadReaderTopologyFrameworks() error {
 	if err != nil {
 		return fmt.Errorf("%w: load CoreFoundation dictionary callbacks: %w", ErrUnavailable, err)
 	}
+
 	cfTypeDictionaryValueCallbacks, err = purego.Dlsym(
 		coreFoundation,
 		"kCFTypeDictionaryValueCallBacks",

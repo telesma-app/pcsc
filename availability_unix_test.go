@@ -11,6 +11,7 @@ import (
 func TestUnavailableNativeLibraryReturnsError(t *testing.T) {
 	originalOpen := openNativeLibrary
 	originalEnsure := ensureNativeLibrary
+
 	t.Cleanup(func() {
 		openNativeLibrary = originalOpen
 		ensureNativeLibrary = originalEnsure
@@ -30,13 +31,16 @@ func TestUnavailableNativeLibraryReturnsError(t *testing.T) {
 		if err == nil {
 			t.Fatal("Enumerate error = nil, want unavailable error")
 		}
+
 		if reader != nil {
 			t.Fatalf("Enumerate reader = %#v, want nil", reader)
 		}
 	}
+
 	if !errors.Is(enumerateErr, ErrUnavailable) {
 		t.Fatalf("Enumerate error = %v, want ErrUnavailable", enumerateErr)
 	}
+
 	if !errors.Is(enumerateErr, loadErr) {
 		t.Fatalf("Enumerate error = %v, want wrapped load error", enumerateErr)
 	}
@@ -45,6 +49,7 @@ func TestUnavailableNativeLibraryReturnsError(t *testing.T) {
 	if card != nil {
 		t.Fatalf("Open card = %#v, want nil", card)
 	}
+
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("Open error = %v, want ErrUnavailable", err)
 	}
@@ -53,6 +58,7 @@ func TestUnavailableNativeLibraryReturnsError(t *testing.T) {
 	if receiver != nil {
 		t.Fatalf("Watch watcher = %#v, want nil", receiver)
 	}
+
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("Watch error = %v, want ErrUnavailable", err)
 	}

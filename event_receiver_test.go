@@ -33,6 +33,7 @@ func TestSnapshotFromReaderStatesNormalizesChangedBit(t *testing.T) {
 		eventState: ReaderStateChanged | ReaderStatePresent,
 		atr:        []byte{1, 2},
 	}}
+
 	readers := snapshotFromReaderStates(states)
 	if got := readers["reader"].State; got != ReaderStatePresent {
 		t.Fatalf("reader state = 0x%x, want 0x%x", got, ReaderStatePresent)
@@ -54,12 +55,14 @@ func TestSnapshotFromReadersIsSorted(t *testing.T) {
 func TestReaderSnapshotReenumeratesInvalidatedTopology(t *testing.T) {
 	originalStatusChange := getStatusChange
 	originalListReaders := listReaders
+
 	t.Cleanup(func() {
 		getStatusChange = originalStatusChange
 		listReaders = originalListReaders
 	})
 
 	var enumerations int
+
 	listReaders = func(scardContext) ([]string, error) {
 		enumerations++
 		if enumerations == 1 {
@@ -70,8 +73,10 @@ func TestReaderSnapshotReenumeratesInvalidatedTopology(t *testing.T) {
 	}
 
 	var statusChanges int
+
 	getStatusChange = func(_ scardContext, _ time.Duration, states []readerState) error {
 		statusChanges++
+
 		for index := range states {
 			switch states[index].name {
 			case "A":
@@ -90,13 +95,15 @@ func TestReaderSnapshotReenumeratesInvalidatedTopology(t *testing.T) {
 		return nil
 	}
 
-	readers, err := readerSnapshot(scardContext(1), nil)
+	readers, err := readerSnapshot(scardContext(1), nil, nil)
 	if err != nil {
 		t.Fatalf("readerSnapshot: %v", err)
 	}
+
 	if got := slices.Sorted(maps.Keys(readers)); !slices.Equal(got, []string{"A", "B"}) {
 		t.Fatalf("readers = %v, want A and B", got)
 	}
+
 	if enumerations != 2 {
 		t.Fatalf("enumerations = %d, want 2", enumerations)
 	}
@@ -105,6 +112,7 @@ func TestReaderSnapshotReenumeratesInvalidatedTopology(t *testing.T) {
 func TestReaderSnapshotStopsBetweenTopologyRetries(t *testing.T) {
 	originalStatusChange := getStatusChange
 	originalListReaders := listReaders
+
 	t.Cleanup(func() {
 		getStatusChange = originalStatusChange
 		listReaders = originalListReaders
@@ -119,9 +127,9 @@ func TestReaderSnapshotStopsBetweenTopologyRetries(t *testing.T) {
 		return ErrUnknownReader
 	}
 
-	_, err := readerSnapshotUntil(scardContext(1), nil, done)
+	_, err := readerSnapshot(scardContext(1), nil, done)
 	if !errors.Is(err, ErrCanceled) {
-		t.Fatalf("readerSnapshotUntil error = %v, want ErrCanceled", err)
+		t.Fatalf("readerSnapshot error = %v, want ErrCanceled", err)
 	}
 }
 
@@ -130,6 +138,7 @@ func TestWatcherReconcilesUnknownReader(t *testing.T) {
 	originalListReaders := listReaders
 	originalCancel := scardCancel
 	originalRelease := scardReleaseContext
+
 	t.Cleanup(func() {
 		getStatusChange = originalStatusChange
 		listReaders = originalListReaders
@@ -142,8 +151,11 @@ func TestWatcherReconcilesUnknownReader(t *testing.T) {
 	}
 
 	blocked := make(chan struct{})
+
 	var unblock sync.Once
+
 	var statusChanges int
+
 	getStatusChange = func(_ scardContext, _ time.Duration, states []readerState) error {
 		statusChanges++
 		switch statusChanges {
@@ -152,6 +164,7 @@ func TestWatcherReconcilesUnknownReader(t *testing.T) {
 		case 2:
 			states[0].eventState = ReaderStatePresent
 			states[0].atr = []byte{2}
+
 			return nil
 		default:
 			<-blocked
@@ -162,6 +175,7 @@ func TestWatcherReconcilesUnknownReader(t *testing.T) {
 		unblock.Do(func() {
 			close(blocked)
 		})
+
 		return 0
 	}
 	scardReleaseContext = func(scardContext) scardResult {
@@ -188,6 +202,7 @@ func TestWatcherReconcilesUnknownReader(t *testing.T) {
 		DeviceEventReaderConnected,
 		DeviceEventCardInserted,
 	})
+
 	if err := receiver.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -198,6 +213,7 @@ func TestWatcherReconcilesTopologyEvent(t *testing.T) {
 	originalListReaders := listReaders
 	originalCancel := scardCancel
 	originalRelease := scardReleaseContext
+
 	t.Cleanup(func() {
 		getStatusChange = originalStatusChange
 		listReaders = originalListReaders
@@ -211,23 +227,30 @@ func TestWatcherReconcilesTopologyEvent(t *testing.T) {
 	}
 
 	blocked := make(chan struct{})
+
 	var unblock sync.Once
+
 	var statusChanges int
+
 	getStatusChange = func(_ scardContext, timeout time.Duration, states []readerState) error {
 		statusChanges++
+
 		if timeout == statusChangeInfinite {
 			<-blocked
 			return ErrCanceled
 		}
+
 		for index := range states {
 			states[index].eventState = ReaderStateEmpty
 		}
+
 		return nil
 	}
 	scardCancel = func(scardContext) scardResult {
 		unblock.Do(func() {
 			close(blocked)
 		})
+
 		return 0
 	}
 	scardReleaseContext = func(scardContext) scardResult {
@@ -243,12 +266,15 @@ func TestWatcherReconcilesTopologyEvent(t *testing.T) {
 	go receiver.run(map[string]*ReaderInfo{
 		"A": {Name: "A", State: ReaderStateEmpty},
 	})
+
 	topology.events <- nil
 
 	assertEventTypes(t, receiver, []DeviceEventType{DeviceEventReaderConnected})
+
 	if err := receiver.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+
 	if statusChanges < 2 {
 		t.Fatalf("status-change calls = %d, want at least 2", statusChanges)
 	}
@@ -258,6 +284,7 @@ func TestWatcherDoesNotCollapseBackToBackCardChanges(t *testing.T) {
 	originalStatusChange := getStatusChange
 	originalCancel := scardCancel
 	originalRelease := scardReleaseContext
+
 	t.Cleanup(func() {
 		getStatusChange = originalStatusChange
 		scardCancel = originalCancel
@@ -265,18 +292,23 @@ func TestWatcherDoesNotCollapseBackToBackCardChanges(t *testing.T) {
 	})
 
 	blocked := make(chan struct{})
+
 	var unblock sync.Once
+
 	var statusChanges int
+
 	getStatusChange = func(_ scardContext, _ time.Duration, states []readerState) error {
 		statusChanges++
 		switch statusChanges {
 		case 1:
 			states[0].eventState = ReaderStatePresent
 			states[0].atr = []byte{1}
+
 			return nil
 		case 2:
 			states[0].eventState = ReaderStateEmpty
 			states[0].atr = nil
+
 			return nil
 		default:
 			<-blocked
@@ -287,6 +319,7 @@ func TestWatcherDoesNotCollapseBackToBackCardChanges(t *testing.T) {
 		unblock.Do(func() {
 			close(blocked)
 		})
+
 		return 0
 	}
 	scardReleaseContext = func(scardContext) scardResult {
@@ -307,9 +340,11 @@ func TestWatcherDoesNotCollapseBackToBackCardChanges(t *testing.T) {
 		DeviceEventCardInserted,
 		DeviceEventCardRemoved,
 	})
+
 	if err := receiver.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+
 	if statusChanges != 3 {
 		t.Fatalf("status-change calls = %d, want 3", statusChanges)
 	}
@@ -317,14 +352,17 @@ func TestWatcherDoesNotCollapseBackToBackCardChanges(t *testing.T) {
 
 func TestWatcherReturnsTerminalErrorFromClose(t *testing.T) {
 	originalRelease := scardReleaseContext
+
 	t.Cleanup(func() {
 		scardReleaseContext = originalRelease
 	})
+
 	scardReleaseContext = func(scardContext) scardResult {
 		return 0
 	}
 
 	topology := newFakeReaderTopology()
+
 	receiver := &eventReceiver{
 		events:        newDeviceEventQueue(),
 		topology:      topology,
@@ -332,11 +370,13 @@ func TestWatcherReturnsTerminalErrorFromClose(t *testing.T) {
 		stopped:       make(chan struct{}),
 	}
 	go receiver.run(nil)
+
 	topology.events <- ErrCommunication
 
 	if _, ok := <-receiver.Listen(); ok {
 		t.Fatal("Listen remained open after the terminal error")
 	}
+
 	if err := receiver.Close(); !errors.Is(err, ErrCommunication) {
 		t.Fatalf("Close error = %v, want ErrCommunication", err)
 	}
@@ -344,6 +384,7 @@ func TestWatcherReturnsTerminalErrorFromClose(t *testing.T) {
 
 func assertEventTypes(t *testing.T, receiver *eventReceiver, want []DeviceEventType) {
 	t.Helper()
+
 	for index, eventType := range want {
 		select {
 		case event := <-receiver.Listen():

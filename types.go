@@ -68,19 +68,5 @@ type CardStatus struct {
 	ATR         []byte
 }
 
-func newCardStatus(
-	readerNames []string,
-	state CardState,
-	protocol Protocol,
-	atr []byte,
-) *CardStatus {
-	return &CardStatus{
-		ReaderNames: readerNames,
-		State:       state,
-		Protocol:    protocol,
-		ATR:         atr,
-	}
-}
-
 // Attribute identifies a PC/SC reader or card attribute.
 type Attribute uint32

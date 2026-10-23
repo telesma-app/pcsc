@@ -243,6 +243,14 @@ This package provides low-level PC/SC access. It does not provide:
 Use [`telesma-app/ctap`](https://github.com/telesma-app/ctap) for FIDO2 commands and
 [`telesma-app/token2`](https://github.com/telesma-app/token2) for Token2 device support.
 
+## Linting
+
+Run golangci-lint v2 with the standard linters and `wsl_v5`:
+
+```sh
+golangci-lint run ./...
+```
+
 ## Testing
 
 Run the normal test suite without hardware:

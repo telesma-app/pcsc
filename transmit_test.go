@@ -12,6 +12,7 @@ import (
 
 func TestTransmitDoesNotRetryAfterInsufficientBuffer(t *testing.T) {
 	original := scardTransmit
+
 	t.Cleanup(func() { scardTransmit = original })
 
 	calls := 0
@@ -25,29 +26,36 @@ func TestTransmitDoesNotRetryAfterInsufficientBuffer(t *testing.T) {
 		recvLength *scardDWORD,
 	) scardResult {
 		calls++
+
 		if sendPCI == nil {
 			t.Fatal("send PCI is nil")
 		}
+
 		if got, want := sendPCI.Length, scardDWORD(unsafe.Sizeof(*sendPCI)); got != want {
 			t.Errorf("send PCI length = %d, want %d", got, want)
 		}
+
 		if got := *recvLength; got != scardDWORD(maxAPDUResponseSize) {
 			t.Errorf("receive buffer size = %d, want %d", got, maxAPDUResponseSize)
 		}
 
 		*recvLength = 8192
+
 		return scardResultFromCodeForTest(scardEInsufficientBuf)
 	}
 
 	c := newCard(0, scardHandle(1), ProtocolT1, 0)
 	response, err := c.Transmit(context.Background(), []byte{0x00, 0xa4, 0x04, 0x00})
+
 	var pcscErr *Error
 	if !errors.As(err, &pcscErr) || pcscErr.Code != scardEInsufficientBuf {
 		t.Fatalf("error = %v, want PC/SC insufficient buffer", err)
 	}
+
 	if response != nil {
 		t.Fatalf("response = %x, want nil", response)
 	}
+
 	if calls != 1 {
 		t.Fatalf("SCardTransmit calls = %d, want 1", calls)
 	}
@@ -56,6 +64,7 @@ func TestTransmitDoesNotRetryAfterInsufficientBuffer(t *testing.T) {
 func TestTransmitCancellationReturnsPromptlyAndRequestsNativeCancellation(t *testing.T) {
 	originalTransmit := scardTransmit
 	originalCancel := cancelCardOperation
+
 	t.Cleanup(func() {
 		scardTransmit = originalTransmit
 		cancelCardOperation = originalCancel
@@ -77,8 +86,11 @@ func TestTransmitCancellationReturnsPromptlyAndRequestsNativeCancellation(t *tes
 	) scardResult {
 		close(started)
 		<-release
+
 		*recvLength = 0
+
 		close(finished)
+
 		return 0
 	}
 	cancelCardOperation = func(_ scardContext) error {
@@ -89,6 +101,7 @@ func TestTransmitCancellationReturnsPromptlyAndRequestsNativeCancellation(t *tes
 	ctx, cancel := context.WithCancel(context.Background())
 	c := newCard(scardContext(1), scardHandle(1), ProtocolT1, 0)
 	result := make(chan error, 1)
+
 	go func() {
 		_, err := c.Transmit(ctx, []byte{0x00, 0xa4, 0x04, 0x00})
 		result <- err
@@ -119,6 +132,7 @@ func TestTransmitCancellationReturnsPromptlyAndRequestsNativeCancellation(t *tes
 func TestTransmitOwnsInputAfterCancellation(t *testing.T) {
 	originalTransmit := scardTransmit
 	originalCancel := cancelCardOperation
+
 	t.Cleanup(func() {
 		scardTransmit = originalTransmit
 		cancelCardOperation = originalCancel
@@ -138,11 +152,15 @@ func TestTransmitOwnsInputAfterCancellation(t *testing.T) {
 	) scardResult {
 		close(started)
 		<-readInput
+
 		if sendLength != 4 {
 			t.Errorf("send length = %d, want 4", sendLength)
 		}
+
 		observed <- sendBuffer
+
 		*receiveLength = 0
+
 		return 0
 	}
 	cancelCardOperation = func(scardContext) error { return nil }
@@ -152,6 +170,7 @@ func TestTransmitOwnsInputAfterCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	card := newCard(scardContext(1), scardHandle(1), ProtocolT1, 0)
 	result := make(chan error, 1)
+
 	go func() {
 		_, err := card.Transmit(ctx, apdu)
 		result <- err
@@ -159,12 +178,15 @@ func TestTransmitOwnsInputAfterCancellation(t *testing.T) {
 
 	<-started
 	cancel()
+
 	if err := <-result; !errors.Is(err, context.Canceled) {
 		t.Fatalf("Transmit error = %v, want context.Canceled", err)
 	}
+
 	for index := range apdu {
 		apdu[index] = 0xff
 	}
+
 	close(readInput)
 
 	if got := <-observed; got == inputPointer {
@@ -174,6 +196,7 @@ func TestTransmitOwnsInputAfterCancellation(t *testing.T) {
 
 func TestTransmitDoesNotStartAfterCancellationWhileQueued(t *testing.T) {
 	original := scardTransmit
+
 	t.Cleanup(func() { scardTransmit = original })
 
 	scardTransmit = func(
@@ -190,18 +213,21 @@ func TestTransmitDoesNotStartAfterCancellationWhileQueued(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+
 	c := newCard(0, scardHandle(1), ProtocolT1, 0)
 	if err := c.lockOperation(context.Background()); err != nil {
 		t.Fatalf("lockOperation: %v", err)
 	}
 
 	result := make(chan error, 1)
+
 	go func() {
 		_, err := c.Transmit(ctx, []byte{0x00})
 		result <- err
 	}()
 
 	cancel()
+
 	select {
 	case err := <-result:
 		if !errors.Is(err, context.Canceled) {
@@ -210,6 +236,7 @@ func TestTransmitDoesNotStartAfterCancellationWhileQueued(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Transmit did not return after cancellation while waiting for the card")
 	}
+
 	c.unlockOperation()
 }
 
