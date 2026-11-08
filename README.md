@@ -248,7 +248,7 @@ Use [`telesma-app/ctap`](https://github.com/telesma-app/ctap) for FIDO2 commands
 Run the normal test suite without hardware:
 
 ```sh
-GOWORK=off go test ./...
+go test ./...
 ```
 
 The generic hardware test is read-only and works with any connected smart
@@ -268,7 +268,7 @@ PCSC_TEST_CTAPNFC=1 go test -run TestCTAPNFC -v
 Run golangci-lint v2 with the standard linters and `wsl_v5`:
 
 ```sh
-GOWORK=off golangci-lint run ./...
+golangci-lint run ./...
 ```
 
 ## License
