@@ -74,7 +74,10 @@ func TestDarwinReaderTopologySchedulesNotificationAfterPCSCRegistration(t *testi
 	topology.changed()
 
 	select {
-	case <-topology.events:
+	case err := <-topology.events:
+		if err != nil {
+			t.Fatal(err)
+		}
 	case <-time.After(2 * readerRegistrationDelay):
 		t.Fatal("delayed topology event was not delivered")
 	}
