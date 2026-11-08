@@ -9,7 +9,7 @@ supports Windows, macOS and Linux.
 > [!WARNING]
 > This module is under active development. Its public API may change during `v0.x`.
 
-## Support
+## Features
 
 The package supports:
 
@@ -243,20 +243,12 @@ This package provides low-level PC/SC access. It does not provide:
 Use [`telesma-app/ctap`](https://github.com/telesma-app/ctap) for FIDO2 commands and
 [`telesma-app/token2`](https://github.com/telesma-app/token2) for Token2 device support.
 
-## Linting
-
-Run golangci-lint v2 with the standard linters and `wsl_v5`:
-
-```sh
-golangci-lint run ./...
-```
-
-## Testing
+## Development
 
 Run the normal test suite without hardware:
 
 ```sh
-go test ./...
+GOWORK=off go test ./...
 ```
 
 The generic hardware test is read-only and works with any connected smart
@@ -273,6 +265,12 @@ reader:
 PCSC_TEST_CTAPNFC=1 go test -run TestCTAPNFC -v
 ```
 
+Run golangci-lint v2 with the standard linters and `wsl_v5`:
+
+```sh
+GOWORK=off golangci-lint run ./...
+```
+
 ## License
 
-Apache License 2.0. See [`LICENSE`](LICENSE).
+[Apache License 2.0](LICENSE).
